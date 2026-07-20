@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: doors-drawers-cutlister-api
+    runtime: node
+    plan: starter
+    autoDeploy: true
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: SERVE_STATIC
+        value: "false"
+      - key: ALLOW_GITHUB_PAGES
+        value: "true"
+      # Set this in Render dashboard to your real GitHub Pages URL.
+      # - key: CORS_ORIGINS
+      #   value: https://yourname.github.io

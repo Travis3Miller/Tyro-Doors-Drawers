@@ -1,0 +1,696 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Doors & Drawers Cutlister</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="bg-shape bg-shape-a"></div>
+  <div class="bg-shape bg-shape-b"></div>
+
+  <main class="container">
+    <header class="hero">
+      <div class="brand" aria-label="THE TYRO">
+        <span class="brand-the">THE</span>
+        <span class="brand-tyro"><span class="brand-t">T</span><span class="brand-rest">YRO</span></span>
+      </div>
+      <h1>Doors & Drawers Cutlister</h1>
+      <p class="subtitle">Build door and drawer cutlists from door sizes or cabinet openings, with saved templates for styles, overlays, and slides.</p>
+    </header>
+
+    <section class="card">
+      <div class="primary-tab-row">
+        <button id="projectTabBtn" type="button" class="tab-btn active">Projects</button>
+        <button id="settingsTabBtn" type="button" class="tab-btn">Settings</button>
+      </div>
+
+      <div id="projectSection" class="section-panel">
+        <div class="toolbar">
+          <label>Project Name
+            <input id="projectName" type="text" placeholder="Example: Smith Kitchen">
+          </label>
+          <button id="saveProjectBtn" type="button">Save Project</button>
+        </div>
+
+        <div class="toolbar">
+          <label>Saved Projects
+            <select id="projectSelect">
+              <option value="">Select a saved project</option>
+            </select>
+          </label>
+          <button id="loadProjectBtn" type="button" class="secondary">Load</button>
+          <button id="deleteProjectBtn" type="button" class="danger">Delete</button>
+        </div>
+
+        <div class="secondary-tab-row">
+          <button id="doorSectionBtn" type="button" class="tab-btn active">Doors</button>
+          <button id="drawerSectionBtn" type="button" class="tab-btn">Drawers</button>
+        </div>
+
+        <div id="doorSection" class="section-panel">
+          <h2>Door Cutlister</h2>
+          <div class="secondary-tab-row">
+            <button id="doorInputSizeBtn" type="button" class="tab-btn active">Input by Door Size</button>
+            <button id="doorInputOpeningBtn" type="button" class="tab-btn">Input by Opening Size</button>
+          </div>
+          <div class="grid door-input-grid">
+            <div id="doorSizeSection" class="input-group">
+              <h3>Door Size List</h3>
+              <label>Door Style (applies to all rows)
+                <select id="doorStyleSelect"></select>
+              </label>
+              <div class="table-wrap">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Qty</th>
+                      <th>Width</th>
+                      <th>Height</th>
+                      <th>Cabinet #</th>
+                    </tr>
+                  </thead>
+                  <tbody id="doorSizeTableBody"></tbody>
+                </table>
+              </div>
+              <div class="single-row">
+                <button id="addDoorRowsBtn" type="button" class="secondary">Add 5 Rows</button>
+              </div>
+              <p class="help compact">Enter finished door sizes to generate stiles, rails, and panels.</p>
+            </div>
+
+            <div id="doorOpeningSection" class="input-group hidden">
+              <h3>Opening Size List</h3>
+              <label>Door Style (applies to all rows)
+                <select id="doorOpeningStyleSelect"></select>
+              </label>
+              <div class="table-wrap">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Overlay</th>
+                      <th>Opening Width</th>
+                      <th>Opening Height</th>
+                      <th>Door Count</th>
+                      <th>Cabinet #</th>
+                    </tr>
+                  </thead>
+                  <tbody id="doorOpeningTableBody"></tbody>
+                </table>
+              </div>
+              <div class="single-row">
+                <button id="addOpeningBtn" type="button" class="secondary">Add 5 Rows</button>
+              </div>
+              <p class="help compact">Opening sizes plus overlays generate door sizes, then a cutlist.</p>
+            </div>
+
+            <div class="input-group door-results">
+              <h3>Door Results</h3>
+              <div id="doorResults" class="results"></div>
+            </div>
+          </div>
+
+          <div class="single-row">
+            <button id="calculateDoorsBtn" type="button">Generate Door List & Cutlist</button>
+          </div>
+        </div>
+
+        <div id="drawerSection" class="section-panel hidden">
+          <h2>Drawer Cutlister</h2>
+          <div class="secondary-tab-row">
+            <button id="drawerInputOpeningBtn" type="button" class="tab-btn active">Input by Openings</button>
+            <button id="drawerInputBoxBtn" type="button" class="tab-btn">Input by Box Sizes</button>
+          </div>
+          <div class="grid drawer-input-grid">
+            <div id="drawerOpeningSection" class="input-group">
+              <h3>Openings</h3>
+              <label>Drawer Slide (applies to all rows)
+                <select id="drawerOpeningSlideSelect"></select>
+              </label>
+              <label>Drawer Construction (applies to all rows)
+                <select id="drawerOpeningConstructionSelect"></select>
+              </label>
+              <div class="table-wrap">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Opening Width</th>
+                      <th>Opening Height</th>
+                      <th>Opening Depth</th>
+                      <th>Drawer Count</th>
+                      <th>Height Mode</th>
+                      <th>Top Opening Height</th>
+                    </tr>
+                  </thead>
+                  <tbody id="drawerOpeningTableBody"></tbody>
+                </table>
+              </div>
+              <div class="single-row">
+                <button id="addDrawerOpeningBtn" type="button" class="secondary">Add 5 Rows</button>
+              </div>
+              <div class="summary" id="drawerOpeningSummary"></div>
+            </div>
+
+            <div id="drawerBoxSection" class="input-group hidden">
+              <h3>Box Sizes</h3>
+              <label>Drawer Slide (applies to all rows)
+                <select id="drawerBoxSlideSelect"></select>
+              </label>
+              <label>Drawer Construction (applies to all rows)
+                <select id="drawerBoxConstructionSelect"></select>
+              </label>
+              <div class="table-wrap">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Box Width</th>
+                      <th>Box Height</th>
+                      <th>Box Depth</th>
+                      <th>Qty</th>
+                    </tr>
+                  </thead>
+                  <tbody id="drawerBoxTableBody"></tbody>
+                </table>
+              </div>
+              <div class="single-row">
+                <button id="addDrawerBoxBtn" type="button" class="secondary">Add 5 Rows</button>
+              </div>
+              <div class="summary" id="drawerBoxSummary"></div>
+            </div>
+
+            <div class="input-group">
+              <h3>Drawer Results</h3>
+              <div id="drawerResults" class="results"></div>
+            </div>
+          </div>
+
+          <div class="single-row">
+            <button id="calculateDrawersBtn" type="button">Calculate Drawer Cutlist</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="settingsSection" class="section-panel hidden">
+        <div class="grid material-grid">
+          <div class="input-group">
+            <h3>Units & Precision</h3>
+            <label>Unit System
+              <select id="unitSystemSelect">
+                <option value="in" selected>Inches (fractions)</option>
+                <option value="metric">Metric (decimals)</option>
+              </select>
+            </label>
+            <label>Precision
+              <select id="precisionSelect"></select>
+            </label>
+            <p class="help compact">Inches displays fractions; metric uses decimals.</p>
+          </div>
+        </div>
+
+        <div class="secondary-tab-row">
+          <button id="settingsDoorsBtn" type="button" class="tab-btn active">Door Settings</button>
+          <button id="settingsDrawersBtn" type="button" class="tab-btn">Drawer Settings</button>
+        </div>
+
+        <div id="settingsDoors" class="section-panel">
+          <div class="secondary-tab-row">
+            <button id="doorSetupTabBtn" type="button" class="tab-btn active">Door Styles</button>
+            <button id="overlaySetupTabBtn" type="button" class="tab-btn">Overlays</button>
+          </div>
+
+          <div id="doorSetupTab" class="tab-panel">
+          <h2>Door Styles</h2>
+          <div class="grid material-grid">
+            <div class="input-group">
+              <h3>Create Door Style</h3>
+              <label>Style Name
+                <input id="newDoorStyleName" type="text" placeholder="Shaker">
+              </label>
+              <label>Joint Type
+                <select id="newDoorJointType">
+                  <option value="copeStick" selected>Cope & Stick</option>
+                  <option value="mitered">Mitered</option>
+                </select>
+              </label>
+              <div class="form-row">
+                <label>Stile Width (X)
+                  <input id="newDoorStileWidth" type="text" inputmode="decimal" data-measure="true" value="2.25">
+                </label>
+              </div>
+              <label class="inline-check">
+                <input id="matchRailsToStiles" type="checkbox" checked>
+                Rails match stiles
+              </label>
+              <div id="railWidthsWrap" class="form-row">
+                <label>Top Rail Width (X)
+                  <input id="newDoorTopRailWidth" type="text" inputmode="decimal" data-measure="true" value="2.25">
+                </label>
+                <label>Bottom Rail Width (X)
+                  <input id="newDoorBottomRailWidth" type="text" inputmode="decimal" data-measure="true" value="2.25">
+                </label>
+              </div>
+              <div class="form-row">
+                <label>Groove Depth (Y)
+                  <input id="newDoorGrooveDepth" type="text" inputmode="decimal" data-measure="true" value="0.5">
+                </label>
+                <label>Panel Clearance (Z)
+                  <input id="newDoorPanelClearance" type="text" inputmode="decimal" data-measure="true" value="0.0625">
+                </label>
+              </div>
+              <label class="inline-check">
+                <input id="oversizeToggle" type="checkbox">
+                Oversize doors
+              </label>
+              <label id="oversizeAmountWrap">Oversize Amount (in)
+                <input id="oversizeAmount" type="text" inputmode="decimal" data-measure="true" value="0.125">
+              </label>
+              <button id="addDoorStyleBtn" type="button">Create Door Style</button>
+              <p class="help compact">Panel height uses $door\_height - 2(rail\_width - stick\_depth)$.</p>
+            </div>
+            <div class="input-group">
+              <h3 id="doorReferenceTitle">Cope N Stick Reference</h3>
+              <figure class="reference-figure">
+                <img id="doorReferenceImage" src="assets/cope-n-stick.png" alt="Cope N Stick reference showing X for stile/rail width, Y for groove distance, Z for panel clearance." loading="lazy">
+                <figcaption id="doorReferenceCaption">
+                  X = stile/rail width, Y = groove distance, Z = panel size offset vs rail.
+                </figcaption>
+              </figure>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Joint</th>
+                  <th>Stile</th>
+                  <th>Bottom Rail</th>
+                  <th>Top Rail</th>
+                  <th>Groove Y</th>
+                  <th>Panel Z</th>
+                  <th>Oversize</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="doorStyleTableBody"></tbody>
+            </table>
+          </div>
+          </div>
+
+          <div id="overlaySetupTab" class="tab-panel hidden">
+          <h2>Overlay Templates</h2>
+          <div class="grid material-grid">
+            <div class="input-group">
+              <h3>Create Overlay</h3>
+              <label>Template Name
+                <input id="newOverlayName" type="text" placeholder="Face Frame 1/2">
+              </label>
+              <div class="form-row">
+                <label>Left (in)
+                  <input id="newOverlayLeft" type="text" inputmode="decimal" data-measure="true" value="0.5">
+                </label>
+                <label>Right (in)
+                  <input id="newOverlayRight" type="text" inputmode="decimal" data-measure="true" value="0.5">
+                </label>
+              </div>
+              <div class="form-row">
+                <label>Top (in)
+                  <input id="newOverlayTop" type="text" inputmode="decimal" data-measure="true" value="0.5">
+                </label>
+                <label>Bottom (in)
+                  <input id="newOverlayBottom" type="text" inputmode="decimal" data-measure="true" value="0.5">
+                </label>
+              </div>
+              <label>Door Gap For Pairs (in)
+                <input id="newOverlayGap" type="text" inputmode="decimal" data-measure="true" value="0.125">
+              </label>
+              <button id="addOverlayBtn" type="button">Create Overlay</button>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>L</th>
+                  <th>R</th>
+                  <th>T</th>
+                  <th>B</th>
+                  <th>Gap</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="overlayTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+        </div>
+
+        <div id="settingsDrawers" class="section-panel hidden">
+          <div class="secondary-tab-row">
+            <button id="drawerSlidesTabBtn" type="button" class="tab-btn active">Slides</button>
+            <button id="drawerConstructionTabBtn" type="button" class="tab-btn">Construction</button>
+          </div>
+
+          <div id="drawerSlidesTab" class="tab-panel">
+            <div class="grid material-grid">
+              <div class="input-group">
+                <h3>Create Slide Type</h3>
+                <label>Slide Name
+                  <input id="newSlideName" type="text" placeholder="Blum Undermount">
+                </label>
+                <div class="form-row">
+                  <label>Side Clearance (in)
+                    <input id="newSlideSide" type="text" inputmode="decimal" data-measure="true" value="0.3125">
+                  </label>
+                  <label>Depth Clearance (in)
+                    <input id="newSlideDepth" type="text" inputmode="decimal" data-measure="true" value="0.5">
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label>Top Clearance (in)
+                    <input id="newSlideTop" type="text" inputmode="decimal" data-measure="true" value="0.5">
+                  </label>
+                  <label>Bottom Clearance (in)
+                    <input id="newSlideBottom" type="text" inputmode="decimal" data-measure="true" value="0.5">
+                  </label>
+                </div>
+                <button id="addSlideBtn" type="button">Create Slide</button>
+              </div>
+            </div>
+
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Side</th>
+                    <th>Depth</th>
+                    <th>Top</th>
+                    <th>Bottom</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="slideTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div id="drawerConstructionTab" class="tab-panel hidden">
+            <div class="grid material-grid">
+              <div class="input-group">
+                <h3>Create Construction</h3>
+                <div id="constructionWizard" class="wizard">
+                  <div class="wizard-step" data-step="1">
+                    <label>Construction Name
+                      <input id="newConstructionName" type="text" placeholder="Butt Joint">
+                    </label>
+                    <label>Construction Type
+                      <select id="newConstructionType">
+                        <option value="butt" selected>Butt Joint</option>
+                        <option value="lock">Lock Joint</option>
+                        <option value="dovetail">Dovetail</option>
+                        <option value="custom">Custom</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div class="wizard-step hidden" data-step="2">
+                    <label id="sideRunWrap">Sides Run
+                      <select id="newConstructionSideRun">
+                        <option value="length" selected>Long Sides (front/back between)</option>
+                        <option value="between">Long Front/Back (sides between)</option>
+                      </select>
+                    </label>
+                    <label id="dovetailModeWrap" class="hidden">Dovetail Mode
+                      <select id="newDovetailMode">
+                        <option value="through" selected>Side + Front Through (box size = part size)</option>
+                        <option value="setback">Side Setback (front/back can set back)</option>
+                      </select>
+                    </label>
+                    <div id="dovetailSetbackWrap" class="form-row hidden">
+                      <label class="inline-check">
+                        <input id="dovetailFrontSetbackEnabled" type="checkbox">
+                        Front Setback
+                      </label>
+                      <label>Front Setback (in)
+                        <input id="newDovetailFrontSetback" type="text" inputmode="decimal" data-measure="true" value="0">
+                      </label>
+                      <label class="inline-check">
+                        <input id="dovetailBackSetbackEnabled" type="checkbox">
+                        Back Setback
+                      </label>
+                      <label>Back Setback (in)
+                        <input id="newDovetailBackSetback" type="text" inputmode="decimal" data-measure="true" value="0">
+                      </label>
+                    </div>
+                      <div class="form-row">
+                        <label id="constructionSideThkWrap">Side Thickness (in) (X)
+                          <input id="newConstructionSideThk" type="text" inputmode="decimal" data-measure="true" value="0.5">
+                        </label>
+                        <label id="constructionFrontBackThkWrap">Front/Back Thickness (in)
+                          <input id="newConstructionFrontThk" type="text" inputmode="decimal" data-measure="true" value="0.5">
+                        </label>
+                      <label id="lockDadoDepthWrap">Dado Depth (in) (Y)
+                        <input id="newLockDadoDepth" type="text" inputmode="decimal" data-measure="true" value="0.25">
+                      </label>
+                      </div>
+                    <div id="customSizingWrap" class="hidden">
+                      <div class="equation-header">
+                        <span>Formula</span>
+                        <span>Adjust (+/-)</span>
+                      </div>
+                      <div class="equation-grid">
+                        <label class="equation-row">
+                          <div class="equation-left">
+                            <span class="equation-label">Front Rip =</span>
+                            <span class="equation-base">Box Height</span>
+                          </div>
+                          <div class="input-split">
+                            <select id="customFrontRipSign">
+                              <option value="sub" selected>-</option>
+                              <option value="add">+</option>
+                            </select>
+                            <input id="customFrontRipOffset" type="text" inputmode="decimal" data-measure="true" value="0">
+                          </div>
+                        </label>
+                        <label class="equation-row">
+                          <div class="equation-left">
+                            <span class="equation-label">Back Rip =</span>
+                            <span class="equation-base">Box Height</span>
+                          </div>
+                          <div class="input-split">
+                            <select id="customBackRipSign">
+                              <option value="sub" selected>-</option>
+                              <option value="add">+</option>
+                            </select>
+                            <input id="customBackRipOffset" type="text" inputmode="decimal" data-measure="true" value="0">
+                          </div>
+                        </label>
+                        <label class="equation-row">
+                          <div class="equation-left">
+                            <span class="equation-label">Side Rip =</span>
+                            <span class="equation-base">Box Height</span>
+                          </div>
+                          <div class="input-split">
+                            <select id="customSideRipSign">
+                              <option value="sub" selected>-</option>
+                              <option value="add">+</option>
+                            </select>
+                            <input id="customSideRipOffset" type="text" inputmode="decimal" data-measure="true" value="0">
+                          </div>
+                        </label>
+                        <label class="equation-row">
+                          <div class="equation-left">
+                            <span class="equation-label">Front Length =</span>
+                            <span class="equation-base">Box Width</span>
+                          </div>
+                          <div class="input-split">
+                            <select id="customFrontLenSign">
+                              <option value="sub" selected>-</option>
+                              <option value="add">+</option>
+                            </select>
+                            <input id="customFrontLenOffset" type="text" inputmode="decimal" data-measure="true" value="0">
+                          </div>
+                        </label>
+                        <label class="equation-row">
+                          <div class="equation-left">
+                            <span class="equation-label">Back Length =</span>
+                            <span class="equation-base">Box Width</span>
+                          </div>
+                          <div class="input-split">
+                            <select id="customBackLenSign">
+                              <option value="sub" selected>-</option>
+                              <option value="add">+</option>
+                            </select>
+                            <input id="customBackLenOffset" type="text" inputmode="decimal" data-measure="true" value="0">
+                          </div>
+                        </label>
+                        <label class="equation-row">
+                          <div class="equation-left">
+                            <span class="equation-label">Side Length =</span>
+                            <span class="equation-base">Box Depth</span>
+                          </div>
+                          <div class="input-split">
+                            <select id="customSideLenSign">
+                              <option value="sub" selected>-</option>
+                              <option value="add">+</option>
+                            </select>
+                            <input id="customSideLenOffset" type="text" inputmode="decimal" data-measure="true" value="0">
+                          </div>
+                        </label>
+                        <label class="equation-row">
+                          <div class="equation-left">
+                            <span class="equation-label">Bottom Rip =</span>
+                            <select id="customBottomWidthBasis" class="equation-base-select">
+                              <option value="width" selected>Box Width</option>
+                              <option value="depth">Box Depth</option>
+                            </select>
+                          </div>
+                          <div class="input-split">
+                            <select id="customBottomWidthSign">
+                              <option value="sub" selected>-</option>
+                              <option value="add">+</option>
+                            </select>
+                            <input id="customBottomWidthOffset" type="text" inputmode="decimal" data-measure="true" value="0">
+                          </div>
+                        </label>
+                        <label class="equation-row">
+                          <div class="equation-left">
+                            <span class="equation-label">Bottom Length =</span>
+                            <select id="customBottomLengthBasis" class="equation-base-select">
+                              <option value="depth" selected>Box Depth</option>
+                              <option value="width">Box Width</option>
+                            </select>
+                          </div>
+                          <div class="input-split">
+                            <select id="customBottomLengthSign">
+                              <option value="sub" selected>-</option>
+                              <option value="add">+</option>
+                            </select>
+                            <input id="customBottomLengthOffset" type="text" inputmode="decimal" data-measure="true" value="0">
+                          </div>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="wizard-step hidden" data-step="3">
+                    <div id="bottomPlacementWrap">
+                      <label>Bottom Placement
+                        <select id="newButtBottomPlacement">
+                          <option value="grooved" selected>Grooved</option>
+                          <option value="planted">Planted on Bottom</option>
+                        </select>
+                      </label>
+                    </div>
+                    <div id="bottomThicknessWrap" class="form-row">
+                      <label>Bottom Thickness (in) (X)
+                        <input id="newConstructionBottomThk" type="text" inputmode="decimal" data-measure="true" value="0.25">
+                      </label>
+                      <label id="bottomThicknessIncludedWrap" class="inline-check">
+                        <input id="newBottomThicknessIncluded" type="checkbox">
+                        Bottom thickness included in drawer height
+                      </label>
+                    </div>
+                    <div id="grooveFields" class="form-row">
+                      <label>Groove Depth (in) (Z)
+                        <input id="newButtGrooveDepth" type="text" inputmode="decimal" data-measure="true" value="0.25">
+                      </label>
+                      <label>Groove Height (from bottom) (in) (Y)
+                        <input id="newButtGrooveHeight" type="text" inputmode="decimal" data-measure="true" value="0.25">
+                      </label>
+                      <label class="inline-check">
+                        <input id="newButtGrooveSides" type="checkbox" checked>
+                        Groove Sides
+                      </label>
+                      <label class="inline-check">
+                        <input id="newButtGrooveFront" type="checkbox" checked>
+                        Groove Front
+                      </label>
+                      <label class="inline-check">
+                        <input id="newButtGrooveBack" type="checkbox">
+                        Groove Back
+                      </label>
+                    </div>
+                  </div>
+                  <div class="wizard-step hidden" data-step="4">
+                    <div id="bottomAdjustWrap">
+                      <div class="form-row">
+                        <label>Bottom Expansion Allowance Width (in)
+                          <input id="newConstructionBottomAdjustWidth" type="text" inputmode="decimal" data-measure="true" value="0.0625">
+                        </label>
+                        <label>Bottom Expansion Allowance Length (in)
+                          <input id="newConstructionBottomAdjustLength" type="text" inputmode="decimal" data-measure="true" value="0.0625">
+                        </label>
+                      </div>
+                      <p class="help compact">Do you leave any expansion space for your drawer bottoms? This is mainly for bottoms that slide in grooves.</p>
+                    </div>
+                    <div id="customConfirmWrap" class="hidden">
+                      <h4>Custom Preview (4 H x 12 W x 21 D)</h4>
+                      <div class="table-wrap">
+                        <table class="result-table">
+                          <thead>
+                            <tr>
+                              <th>Part</th>
+                              <th>Width</th>
+                              <th>Length</th>
+                              <th>Thk</th>
+                              <th>Qty</th>
+                            </tr>
+                          </thead>
+                          <tbody id="customConfirmBody"></tbody>
+                        </table>
+                      </div>
+                      <p class="help compact">Confirm the part sizes before saving.</p>
+                    </div>
+                    <button id="addConstructionBtn" type="button">Create Construction</button>
+                  </div>
+                  <div class="wizard-nav">
+                    <button id="constructionPrevBtn" type="button" class="secondary">Back</button>
+                    <button id="constructionNextBtn" type="button">Next</button>
+                  </div>
+                </div>
+              </div>
+              <div class="input-group" id="constructionReferenceGroup">
+                <h3 id="drawerConstructionTitle">Construction Reference</h3>
+                <figure class="reference-figure">
+                  <img id="drawerConstructionImage" src="Bottom Groove Location and Depth(Square).png" alt="Drawer construction reference." loading="lazy">
+                  <figcaption id="drawerConstructionCaption">
+                    X = groove width, Y = groove height, Z = groove depth.
+                  </figcaption>
+                </figure>
+              </div>
+            </div>
+
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Side Thk</th>
+                    <th>Front/Back Thk</th>
+                    <th>Bottom Thk</th>
+                    <th>Bottom Adj</th>
+                    <th>Grooves</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="constructionTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="config.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
