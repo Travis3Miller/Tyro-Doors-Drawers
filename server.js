@@ -93,7 +93,11 @@ function serializeCookie(name, value, options = {}) {
 }
 
 function getSessionSecret() {
-  return process.env.SESSION_SECRET || "dev-session-secret";
+  const secret = process.env.SESSION_SECRET || "";
+  if (!secret) {
+    throw new Error("SESSION_SECRET is required.");
+  }
+  return secret;
 }
 
 function createSessionToken(payload, secret) {
@@ -443,9 +447,11 @@ function normalizeUserId(value) {
   return safe;
 }
 
-function requestUserId(req) {
-  const raw = req.get("x-user-id") || "";
-  return normalizeUserId(raw);
+function catalogScopeUserId(req) {
+  if (req.currentUser && req.currentUser.id) {
+    return normalizeUserId(req.currentUser.id);
+  }
+  return PUBLIC_USER_ID;
 }
 
 function getUserStore(store, userId) {
@@ -461,6 +467,7 @@ function attachRawBody(req, _res, buffer) {
 
 function createApp(options = {}) {
   const app = express();
+  const sessionSecret = getSessionSecret();
   const userStore = options.userStore || createUserStore({});
   const userStoreReady = Promise.resolve(userStore.init());
 
@@ -482,7 +489,7 @@ function createApp(options = {}) {
       req.currentUser = null;
       const cookies = readCookies(req);
       const token = cookies[SESSION_COOKIE_NAME];
-      const session = verifySessionToken(token, getSessionSecret());
+      const session = verifySessionToken(token, sessionSecret);
       if (session && session.userId) {
         req.currentUser = await userStore.getUserById(session.userId);
       }
@@ -542,7 +549,7 @@ function createApp(options = {}) {
       const user = await userStore.upsertUserFromIdentity(identity);
       const token = createSessionToken(
         { userId: user.id, exp: Date.now() + SESSION_TTL_MS },
-        getSessionSecret()
+        sessionSecret
       );
       res.setHeader("Set-Cookie", serializeCookie(SESSION_COOKIE_NAME, token, {
         path: "/",
@@ -557,7 +564,11 @@ function createApp(options = {}) {
         user: userSummary(user),
         plan: resolvePlanForUser(user)
       });
-    } catch (_err) {
+    } catch (err) {
+      if (err && /Conflicting identity match/i.test(err.message)) {
+        res.status(409).json({ error: "Conflicting identity payload." });
+        return;
+      }
       res.status(500).json({ error: "Could not complete sign in." });
     }
   });
@@ -593,7 +604,11 @@ function createApp(options = {}) {
         user: userSummary(updatedUser),
         plan: resolvePlanForUser(updatedUser)
       });
-    } catch (_err) {
+    } catch (err) {
+      if (err && /Conflicting identity match/i.test(err.message)) {
+        res.status(409).json({ error: "Conflicting billing identity." });
+        return;
+      }
       res.status(500).json({ error: "Could not process billing webhook." });
     }
   });
@@ -602,7 +617,7 @@ function createApp(options = {}) {
     try {
       await userStoreReady;
       const store = await readStore();
-      const catalogStore = getUserStore(store, requestUserId(req));
+      const catalogStore = getUserStore(store, catalogScopeUserId(req));
       const projects = req.currentUser ? await userStore.listProjectsByUser(req.currentUser.id) : [];
       res.json({ ...catalogStore, projects });
     } catch (_err) {
@@ -714,10 +729,10 @@ function createApp(options = {}) {
     }
   });
 
-  app.put("/api/settings", async (req, res) => {
+  app.put("/api/settings", requireAuth, async (req, res) => {
     try {
       const store = await readStore();
-      const userStoreRecord = getUserStore(store, requestUserId(req));
+      const userStoreRecord = getUserStore(store, catalogScopeUserId(req));
       const body = req.body || {};
       userStoreRecord.settings = {
         ...userStoreRecord.settings,
@@ -732,10 +747,10 @@ function createApp(options = {}) {
   });
 
   function listHandlers({ listKey, pathBase }) {
-    app.post(`/api/${pathBase}`, async (req, res) => {
+    app.post(`/api/${pathBase}`, requireAuth, async (req, res) => {
       try {
         const store = await readStore();
-        const userStoreRecord = getUserStore(store, requestUserId(req));
+        const userStoreRecord = getUserStore(store, catalogScopeUserId(req));
         const item = { id: crypto.randomUUID(), ...(req.body || {}) };
         userStoreRecord[listKey].push(item);
         await writeStore(store);
@@ -745,10 +760,10 @@ function createApp(options = {}) {
       }
     });
 
-    app.put(`/api/${pathBase}/:id`, async (req, res) => {
+    app.put(`/api/${pathBase}/:id`, requireAuth, async (req, res) => {
       try {
         const store = await readStore();
-        const userStoreRecord = getUserStore(store, requestUserId(req));
+        const userStoreRecord = getUserStore(store, catalogScopeUserId(req));
         const idx = userStoreRecord[listKey].findIndex((item) => item.id === req.params.id);
 
         if (idx < 0) {
@@ -763,10 +778,10 @@ function createApp(options = {}) {
       }
     });
 
-    app.delete(`/api/${pathBase}/:id`, async (req, res) => {
+    app.delete(`/api/${pathBase}/:id`, requireAuth, async (req, res) => {
       try {
         const store = await readStore();
-        const userStoreRecord = getUserStore(store, requestUserId(req));
+        const userStoreRecord = getUserStore(store, catalogScopeUserId(req));
         const before = userStoreRecord[listKey].length;
         userStoreRecord[listKey] = userStoreRecord[listKey].filter((item) => item.id !== req.params.id);
 

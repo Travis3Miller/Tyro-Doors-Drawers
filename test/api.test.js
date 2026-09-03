@@ -115,6 +115,13 @@ test("health/config, auth session, project isolation, and billing entitlement", 
     body: userAIdentityRebind
   });
   assert.equal(ssoARebindRes.status, 200);
+  const rebindCookieA = ssoARebindRes.headers.get("set-cookie");
+  const rebindSessionRes = await jsonRequest(baseUrl, "/api/auth/session", {
+    headers: { cookie: rebindCookieA }
+  });
+  const rebindSessionBody = await rebindSessionRes.json();
+  assert.equal(rebindSessionRes.status, 200);
+  assert.equal(rebindSessionBody.user.externalMemberId, "member-a");
 
   const createProjectRes = await jsonRequest(baseUrl, "/api/projects", {
     method: "POST",
@@ -178,6 +185,20 @@ test("health/config, auth session, project isolation, and billing entitlement", 
     })
   });
   assert.equal(billingRes.status, 200);
+
+  const billingWrongMemberRes = await jsonRequest(baseUrl, "/api/billing/webhook", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-billing-secret": process.env.BILLING_WEBHOOK_SECRET
+    },
+    body: JSON.stringify({
+      externalMemberId: "member-a-other",
+      plan: "pro",
+      subscriptionStatus: "active"
+    })
+  });
+  assert.equal(billingWrongMemberRes.status, 404);
 
   const configProRes = await jsonRequest(baseUrl, "/api/config", {
     headers: { cookie: sessionCookieA }

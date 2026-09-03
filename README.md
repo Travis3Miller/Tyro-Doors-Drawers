@@ -12,7 +12,7 @@ Node + Express API and static frontend for the cutlister app.
 - `POST /api/billing/webhook` updates user billing state server-side.
 - `GET/POST/PUT/DELETE /api/projects` are auth-required and user-scoped.
 - `GET/POST/PUT/DELETE /api/presets` are auth-required and user-scoped.
-- Existing catalog/settings endpoints remain available.
+- Existing catalog/settings endpoints remain available, with authenticated writes.
 
 ## Identity exchange flow
 

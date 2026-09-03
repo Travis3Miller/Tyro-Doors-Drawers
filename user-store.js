@@ -43,6 +43,29 @@ function normalizeState(value) {
   };
 }
 
+function resolveIdentityMatch(users, identity = {}) {
+  const byMember = identity.externalMemberId
+    ? users.filter((user) => user.externalMemberId === identity.externalMemberId)
+    : [];
+  const byCustomer = identity.externalCustomerId
+    ? users.filter((user) => user.externalCustomerId === identity.externalCustomerId)
+    : [];
+  const byEmail = identity.email
+    ? users.filter((user) => user.email && user.email.toLowerCase() === identity.email)
+    : [];
+
+  if (byMember.length > 1 || byCustomer.length > 1 || byEmail.length > 1) {
+    throw new Error("Conflicting identity match.");
+  }
+
+  const matches = [byMember[0], byCustomer[0], byEmail[0]].filter(Boolean);
+  const uniqueIds = new Set(matches.map((user) => user.id));
+  if (uniqueIds.size > 1) {
+    throw new Error("Conflicting identity match.");
+  }
+  return matches[0] || null;
+}
+
 function normalizeProjectInput(input = {}) {
   const payload = input.payload && typeof input.payload === "object" ? input.payload : null;
   const settings = input.settings && typeof input.settings === "object"
@@ -146,8 +169,12 @@ class UserStore {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
 
-        CREATE INDEX IF NOT EXISTS idx_users_external_customer_id ON users(external_customer_id);
-        CREATE INDEX IF NOT EXISTS idx_users_external_member_id ON users(external_member_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_external_customer_id_unique
+          ON users(external_customer_id)
+          WHERE external_customer_id IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_external_member_id_unique
+          ON users(external_member_id)
+          WHERE external_member_id IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
         CREATE INDEX IF NOT EXISTS idx_presets_user_id ON presets(user_id);
       `);
@@ -184,37 +211,61 @@ class UserStore {
     return run;
   }
 
-  _queryUserByIdentity(identity = {}) {
-    const filters = [];
-    const values = [];
-
-    if (identity.email) {
-      values.push(String(identity.email).trim().toLowerCase());
-      filters.push(`LOWER(email) = $${values.length}`);
-    }
-    if (identity.externalCustomerId) {
-      values.push(String(identity.externalCustomerId).trim());
-      filters.push(`external_customer_id = $${values.length}`);
-    }
-    if (identity.externalMemberId) {
-      values.push(String(identity.externalMemberId).trim());
-      filters.push(`external_member_id = $${values.length}`);
-    }
-
-    if (!filters.length) {
+  async _lookupUserByFieldPostgres(db, field, value) {
+    if (!value) {
       return null;
     }
-
-    return {
-      sql: `
-        SELECT id, email, name, plan, subscription_status, external_customer_id, external_member_id, created_at, updated_at
-        FROM users
-        WHERE ${filters.join(" OR ")}
-        ORDER BY updated_at DESC
-        LIMIT 1
-      `,
-      values
+    const queryByField = {
+      email: {
+        sql: `
+          SELECT id, email, name, plan, subscription_status, external_customer_id, external_member_id, created_at, updated_at
+          FROM users
+          WHERE LOWER(email) = $1
+        `,
+        value: String(value).trim().toLowerCase()
+      },
+      externalCustomerId: {
+        sql: `
+          SELECT id, email, name, plan, subscription_status, external_customer_id, external_member_id, created_at, updated_at
+          FROM users
+          WHERE external_customer_id = $1
+        `,
+        value: String(value).trim()
+      },
+      externalMemberId: {
+        sql: `
+          SELECT id, email, name, plan, subscription_status, external_customer_id, external_member_id, created_at, updated_at
+          FROM users
+          WHERE external_member_id = $1
+        `,
+        value: String(value).trim()
+      }
     };
+    const config = queryByField[field];
+    if (!config) {
+      return null;
+    }
+    const result = await db.query(config.sql, [config.value]);
+    if (result.rows.length > 1) {
+      throw new Error(`Conflicting identity match for ${field}.`);
+    }
+    return result.rows[0] || null;
+  }
+
+  async _findUserByIdentityPostgres(db, identity = {}) {
+    const matches = await Promise.all([
+      this._lookupUserByFieldPostgres(db, "externalMemberId", identity.externalMemberId),
+      this._lookupUserByFieldPostgres(db, "externalCustomerId", identity.externalCustomerId),
+      this._lookupUserByFieldPostgres(db, "email", identity.email)
+    ]);
+    const uniqueIds = new Set(matches.filter(Boolean).map((row) => row.id));
+    if (uniqueIds.size > 1) {
+      throw new Error("Conflicting identity match.");
+    }
+    if (!uniqueIds.size) {
+      return null;
+    }
+    return matches.find(Boolean);
   }
 
   async getUserById(userId) {
@@ -273,83 +324,91 @@ class UserStore {
     const requestedSubscriptionStatus = normalizeStatus(identity.subscriptionStatus, "inactive");
 
     if (this.mode === "postgres") {
-      const finder = this._queryUserByIdentity({ email, externalCustomerId, externalMemberId });
-      let existing = null;
-      if (finder) {
-        const result = await this.pool.query(finder.sql, finder.values);
-        existing = result.rows[0] || null;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const client = await this.pool.connect();
+        try {
+          await client.query("BEGIN");
+          const existing = await this._findUserByIdentityPostgres(client, { email, externalCustomerId, externalMemberId });
+
+          if (!existing) {
+            const id = newId();
+            const inserted = await client.query(
+              `
+                INSERT INTO users (id, email, name, plan, subscription_status, external_customer_id, external_member_id, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+                RETURNING id, email, name, plan, subscription_status, external_customer_id, external_member_id, created_at, updated_at
+              `,
+              [id, email, name, requestedPlan, requestedSubscriptionStatus, externalCustomerId || null, externalMemberId || null]
+            );
+            await client.query("COMMIT");
+            return mapUser({
+              id: inserted.rows[0].id,
+              email: inserted.rows[0].email,
+              name: inserted.rows[0].name,
+              plan: inserted.rows[0].plan,
+              subscriptionStatus: inserted.rows[0].subscription_status,
+              externalCustomerId: inserted.rows[0].external_customer_id,
+              externalMemberId: inserted.rows[0].external_member_id,
+              createdAt: new Date(inserted.rows[0].created_at).toISOString(),
+              updatedAt: new Date(inserted.rows[0].updated_at).toISOString()
+            });
+          }
+
+          const resolvedExternalCustomerId = existing.external_customer_id || externalCustomerId || null;
+          const resolvedExternalMemberId = existing.external_member_id || externalMemberId || null;
+          const updated = await client.query(
+            `
+              UPDATE users
+              SET
+                email = COALESCE(NULLIF($2, ''), email),
+                name = COALESCE(NULLIF($3, ''), name),
+                external_customer_id = $4,
+                external_member_id = $5,
+                plan = COALESCE(NULLIF($6, ''), plan),
+                subscription_status = COALESCE(NULLIF($7, ''), subscription_status),
+                updated_at = NOW()
+              WHERE id = $1
+              RETURNING id, email, name, plan, subscription_status, external_customer_id, external_member_id, created_at, updated_at
+            `,
+            [
+              existing.id,
+              email,
+              name,
+              resolvedExternalCustomerId,
+              resolvedExternalMemberId,
+              requestedPlan,
+              requestedSubscriptionStatus
+            ]
+          );
+
+          await client.query("COMMIT");
+          return mapUser({
+            id: updated.rows[0].id,
+            email: updated.rows[0].email,
+            name: updated.rows[0].name,
+            plan: updated.rows[0].plan,
+            subscriptionStatus: updated.rows[0].subscription_status,
+            externalCustomerId: updated.rows[0].external_customer_id,
+            externalMemberId: updated.rows[0].external_member_id,
+            createdAt: new Date(updated.rows[0].created_at).toISOString(),
+            updatedAt: new Date(updated.rows[0].updated_at).toISOString()
+          });
+        } catch (err) {
+          await client.query("ROLLBACK");
+          if (err && err.code === "23505" && attempt === 0) {
+            continue;
+          }
+          throw err;
+        } finally {
+          client.release();
+        }
       }
-
-      if (!existing) {
-        const id = newId();
-        const inserted = await this.pool.query(
-          `
-            INSERT INTO users (id, email, name, plan, subscription_status, external_customer_id, external_member_id, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
-            RETURNING id, email, name, plan, subscription_status, external_customer_id, external_member_id, created_at, updated_at
-          `,
-          [id, email, name, requestedPlan, requestedSubscriptionStatus, externalCustomerId || null, externalMemberId || null]
-        );
-        return mapUser({
-          id: inserted.rows[0].id,
-          email: inserted.rows[0].email,
-          name: inserted.rows[0].name,
-          plan: inserted.rows[0].plan,
-          subscriptionStatus: inserted.rows[0].subscription_status,
-          externalCustomerId: inserted.rows[0].external_customer_id,
-          externalMemberId: inserted.rows[0].external_member_id,
-          createdAt: new Date(inserted.rows[0].created_at).toISOString(),
-          updatedAt: new Date(inserted.rows[0].updated_at).toISOString()
-        });
-      }
-
-      const resolvedExternalCustomerId = existing.external_customer_id || externalCustomerId || null;
-      const resolvedExternalMemberId = existing.external_member_id || externalMemberId || null;
-      const updated = await this.pool.query(
-        `
-          UPDATE users
-          SET
-            email = COALESCE(NULLIF($2, ''), email),
-            name = COALESCE(NULLIF($3, ''), name),
-            external_customer_id = $4,
-            external_member_id = $5,
-            plan = COALESCE(NULLIF($6, ''), plan),
-            subscription_status = COALESCE(NULLIF($7, ''), subscription_status),
-            updated_at = NOW()
-          WHERE id = $1
-          RETURNING id, email, name, plan, subscription_status, external_customer_id, external_member_id, created_at, updated_at
-        `,
-        [
-          existing.id,
-          email,
-          name,
-          resolvedExternalCustomerId,
-          resolvedExternalMemberId,
-          requestedPlan,
-          requestedSubscriptionStatus
-        ]
-      );
-
-      return mapUser({
-        id: updated.rows[0].id,
-        email: updated.rows[0].email,
-        name: updated.rows[0].name,
-        plan: updated.rows[0].plan,
-        subscriptionStatus: updated.rows[0].subscription_status,
-        externalCustomerId: updated.rows[0].external_customer_id,
-        externalMemberId: updated.rows[0].external_member_id,
-        createdAt: new Date(updated.rows[0].created_at).toISOString(),
-        updatedAt: new Date(updated.rows[0].updated_at).toISOString()
-      });
+      throw new Error("Could not upsert user.");
     }
 
     return this._withFileLock(async () => {
       const state = await this._readFileState();
-      const match = state.users.find((user) =>
-        (email && user.email && user.email.toLowerCase() === email)
-        || (externalCustomerId && user.externalCustomerId === externalCustomerId)
-        || (externalMemberId && user.externalMemberId === externalMemberId)
-      );
+      const match = resolveIdentityMatch(state.users, { email, externalCustomerId, externalMemberId });
 
       if (!match) {
         const timestamp = nowIso();
@@ -401,12 +460,7 @@ class UserStore {
     const subscriptionStatus = normalizeStatus(update.subscriptionStatus, "inactive");
 
     if (this.mode === "postgres") {
-      const query = this._queryUserByIdentity(finder);
-      if (!query) {
-        return null;
-      }
-      const existing = await this.pool.query(query.sql, query.values);
-      const row = existing.rows[0];
+      const row = await this._findUserByIdentityPostgres(this.pool, finder);
       if (!row) {
         return null;
       }
@@ -444,11 +498,7 @@ class UserStore {
 
     return this._withFileLock(async () => {
       const state = await this._readFileState();
-      const user = state.users.find((entry) =>
-        (finder.email && entry.email && entry.email.toLowerCase() === finder.email)
-        || (finder.externalCustomerId && entry.externalCustomerId === finder.externalCustomerId)
-        || (finder.externalMemberId && entry.externalMemberId === finder.externalMemberId)
-      );
+      const user = resolveIdentityMatch(state.users, finder);
 
       if (!user) {
         return null;
