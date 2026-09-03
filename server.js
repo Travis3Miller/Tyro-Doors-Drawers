@@ -3,6 +3,7 @@ const path = require("path");
 const fs = require("fs/promises");
 const crypto = require("crypto");
 const cors = require("cors");
+const rateLimit = require("express-rate-limit");
 const { createUserStore } = require("./user-store");
 
 const PORT = process.env.PORT || 3000;
@@ -14,6 +15,26 @@ const SESSION_COOKIE_NAME = "cabinet_session";
 const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 24 * 30);
 const PRO_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "paid"]);
 let legacyStoreQueue = Promise.resolve();
+const STATIC_FILES = new Set([
+  "index.html",
+  "script.js",
+  "styles.css",
+  "config.js",
+  "Bottom Groove Location and Depth(Square).png",
+  "Bottom Groove Location and Depth.png",
+  "ButtJoint Drawer.jpg",
+  "ButtJoint Side Long.png",
+  "ButtJoint Side Short.png",
+  "DT Side and Front Through.png",
+  "Dovetail Drawer Box.png",
+  "Dovetail Side Set Back.png",
+  "LJ Long Front Dado Depth(SQUARE).png",
+  "LJ Long Front Dado Depth.png",
+  "LJ Long Side Dado Depth.png",
+  "LockJoint Drawer.jpg",
+  "Plant-On Bottom.png",
+  "Rear Drawer Bottom Dim.png"
+]);
 
 const configuredOrigins = (process.env.CORS_ORIGINS || "")
   .split(",")
@@ -468,6 +489,18 @@ function attachRawBody(req, _res, buffer) {
 function createApp(options = {}) {
   const app = express();
   const sessionSecret = getSessionSecret();
+  const requestRateLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 600,
+    standardHeaders: true,
+    legacyHeaders: false
+  });
+  const authRateLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 60,
+    standardHeaders: true,
+    legacyHeaders: false
+  });
   const userStore = options.userStore || createUserStore({});
   const userStoreReady = Promise.resolve(userStore.init());
 
@@ -483,7 +516,7 @@ function createApp(options = {}) {
   }));
   app.use(express.json({ verify: attachRawBody }));
 
-  app.use(async (req, _res, next) => {
+  app.use(requestRateLimiter, async (req, _res, next) => {
     try {
       await userStoreReady;
       req.currentUser = null;
@@ -500,7 +533,17 @@ function createApp(options = {}) {
   });
 
   if (SERVE_STATIC) {
-    app.use(express.static(__dirname));
+    app.get("/", requestRateLimiter, (_req, res) => {
+      res.sendFile(path.join(__dirname, "index.html"));
+    });
+    app.get("/:asset", requestRateLimiter, (req, res, next) => {
+      const asset = req.params.asset;
+      if (!STATIC_FILES.has(asset)) {
+        next();
+        return;
+      }
+      res.sendFile(path.join(__dirname, asset));
+    });
   }
 
   function requireAuth(req, res, next) {
@@ -532,7 +575,7 @@ function createApp(options = {}) {
     });
   });
 
-  app.post("/api/auth/sso", async (req, res) => {
+  app.post("/api/auth/sso", authRateLimiter, async (req, res) => {
     try {
       await userStoreReady;
       if (!identityTrusted(req)) {
