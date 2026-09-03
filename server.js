@@ -6,7 +6,7 @@ const cors = require("cors");
 const { createUserStore } = require("./user-store");
 
 const PORT = process.env.PORT || 3000;
-const DATA_FILE = path.join(__dirname, "data", "store.json");
+const DATA_FILE = process.env.LEGACY_STORE_FILE || path.join(__dirname, "data", "store.json");
 const PUBLIC_USER_ID = "public";
 const USER_ID_REGEX = /^[a-zA-Z0-9_-]{6,80}$/;
 const SERVE_STATIC = process.env.SERVE_STATIC !== "false";

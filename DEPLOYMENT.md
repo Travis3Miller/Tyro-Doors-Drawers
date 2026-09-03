@@ -1,27 +1,43 @@
 # GitHub + Render Deployment Setup
 
-This project is now configured to support:
+This project is configured for:
 - Static frontend hosting (GitHub Pages)
 - Node API hosting (Render)
-- Per-browser user scoping for saved projects/templates through `x-user-id`
+- Server-side authenticated multi-user project/preset storage
+- Server-side billing entitlement checks
 
 ## 1. Deploy backend to Render
 
 1. Push this repo to GitHub.
-2. In Render, create a new **Web Service** from the repo.
-3. Use:
-   - Build command: `npm install`
-   - Start command: `npm start`
-4. Set environment variables in Render:
-   - `SERVE_STATIC=false`
-   - `CORS_ORIGINS=https://<your-github-username>.github.io`
-   - `ALLOW_GITHUB_PAGES=true`
-5. Deploy and copy your Render URL, for example:
-   - `https://doors-drawers-cutlister-api.onrender.com`
+2. In Render, create a Blueprint deploy from `render.yaml`.
+3. Confirm the web service and Postgres database resources are created.
+4. In the web service environment, set:
+   - `IDENTITY_SHARED_SECRET`
+   - `BILLING_WEBHOOK_SECRET`
+   - `WIX_UPGRADE_URL`
+5. `SESSION_SECRET` is generated automatically.
+6. `DATABASE_URL` is automatically wired from Render Postgres.
 
-## 2. Point frontend to Render API
+## 2. Configure trusted identity exchange
 
-Edit `config.js` in this repo:
+Your website backend must call `POST /api/auth/sso` with:
+- JSON identity payload
+- `x-identity-timestamp`
+- `x-identity-signature` (HMAC SHA256 of `timestamp + "." + rawJsonBody` with `IDENTITY_SHARED_SECRET`)
+
+The API sets an httpOnly signed `cabinet_session` cookie.
+
+## 3. Configure billing webhook
+
+Send billing updates to `POST /api/billing/webhook` and authenticate with:
+- `x-billing-secret`, or
+- bearer token in `Authorization`
+
+Use `BILLING_WEBHOOK_SECRET` as the shared secret.
+
+## 4. Frontend API base URL
+
+Set `config.js`:
 
 ```js
 window.CUTLISTER_CONFIG = {
@@ -29,29 +45,10 @@ window.CUTLISTER_CONFIG = {
 };
 ```
 
-Commit and push.
+## 5. Local development
 
-## 3. Deploy frontend to GitHub Pages
+- Run `npm install`
+- Run `npm start`
+- Run `npm test`
 
-1. In GitHub repo settings, enable **Pages**.
-2. Choose branch and root folder where `index.html` exists.
-3. Wait for Pages to publish.
-
-Your frontend will now call Render API using the URL from `config.js`.
-
-## 4. Local development
-
-- Full stack from Node (same origin):
-  - Keep `SERVE_STATIC=true`
-  - Run `npm install`
-  - Run `npm start`
-  - Open `http://localhost:3000`
-- Frontend static + API local:
-  - Keep `config.js` `apiBaseUrl` empty for same origin or set to local API URL.
-
-## Important notes
-
-1. Current per-user separation is browser-based (local user id sent in request header).
-2. It is not secure authentication.
-3. For paid plans and true accounts, add real auth (JWT/session with user table) and a persistent database.
-4. `data/store.json` file storage is fine for testing, but production should move to a database for reliability and scaling.
+When `DATABASE_URL` is missing, user/account/project/preset data uses local JSON storage.
