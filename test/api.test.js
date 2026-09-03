@@ -98,6 +98,24 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   assert.equal(sessionBody.authenticated, true);
   assert.equal(sessionBody.user.email, "user-a@example.com");
 
+  const userAIdentityRebind = JSON.stringify({
+    email: "user-a@example.com",
+    name: "User A Renamed",
+    externalMemberId: "member-a-other"
+  });
+  const tsARebind = String(Date.now());
+  const sigARebind = signIdentity(process.env.IDENTITY_SHARED_SECRET, tsARebind, userAIdentityRebind);
+  const ssoARebindRes = await jsonRequest(baseUrl, "/api/auth/sso", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-identity-timestamp": tsARebind,
+      "x-identity-signature": sigARebind
+    },
+    body: userAIdentityRebind
+  });
+  assert.equal(ssoARebindRes.status, 200);
+
   const createProjectRes = await jsonRequest(baseUrl, "/api/projects", {
     method: "POST",
     headers: {
@@ -154,7 +172,7 @@ test("health/config, auth session, project isolation, and billing entitlement", 
       "x-billing-secret": process.env.BILLING_WEBHOOK_SECRET
     },
     body: JSON.stringify({
-      email: "user-a@example.com",
+      externalMemberId: "member-a",
       plan: "pro",
       subscriptionStatus: "active"
     })

@@ -795,9 +795,10 @@ function createApp(options = {}) {
 async function startServer(options = {}) {
   const app = createApp(options);
   await app.locals.userStoreReady;
+  const listenPort = options.port ?? PORT;
   return new Promise((resolve) => {
-    const server = app.listen(options.port || PORT, () => {
-      console.log(`Door and Drawer Cutlister API running on port ${options.port || PORT}`);
+    const server = app.listen(listenPort, () => {
+      console.log(`Door and Drawer Cutlister API running on port ${listenPort}`);
       resolve({ app, server });
     });
   });

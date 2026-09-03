@@ -106,7 +106,7 @@ class UserStore {
     this.filePath = options.filePath || process.env.USER_STORE_FILE || DEFAULT_FILE;
     this.mode = this.databaseUrl ? "postgres" : "file";
     this.pool = null;
-    this._fileWrite = Promise.resolve();
+    this._fileQueue = Promise.resolve();
   }
 
   async init() {
@@ -175,10 +175,13 @@ class UserStore {
 
   async _writeFileState(state) {
     const normalized = normalizeState(state);
-    this._fileWrite = this._fileWrite.then(() =>
-      fs.writeFile(this.filePath, JSON.stringify(normalized, null, 2), "utf8")
-    );
-    await this._fileWrite;
+    await fs.writeFile(this.filePath, JSON.stringify(normalized, null, 2), "utf8");
+  }
+
+  async _withFileLock(operation) {
+    const run = this._fileQueue.then(() => operation());
+    this._fileQueue = run.catch(() => {});
+    return run;
   }
 
   _queryUserByIdentity(identity = {}) {
@@ -300,14 +303,16 @@ class UserStore {
         });
       }
 
+      const resolvedExternalCustomerId = existing.external_customer_id || externalCustomerId || null;
+      const resolvedExternalMemberId = existing.external_member_id || externalMemberId || null;
       const updated = await this.pool.query(
         `
           UPDATE users
           SET
             email = COALESCE(NULLIF($2, ''), email),
             name = COALESCE(NULLIF($3, ''), name),
-            external_customer_id = COALESCE(NULLIF($4, ''), external_customer_id),
-            external_member_id = COALESCE(NULLIF($5, ''), external_member_id),
+            external_customer_id = $4,
+            external_member_id = $5,
             plan = COALESCE(NULLIF($6, ''), plan),
             subscription_status = COALESCE(NULLIF($7, ''), subscription_status),
             updated_at = NOW()
@@ -318,8 +323,8 @@ class UserStore {
           existing.id,
           email,
           name,
-          externalCustomerId,
-          externalMemberId,
+          resolvedExternalCustomerId,
+          resolvedExternalMemberId,
           requestedPlan,
           requestedSubscriptionStatus
         ]
@@ -338,41 +343,46 @@ class UserStore {
       });
     }
 
-    const state = await this._readFileState();
-    const match = state.users.find((user) =>
-      (email && user.email && user.email.toLowerCase() === email)
-      || (externalCustomerId && user.externalCustomerId === externalCustomerId)
-      || (externalMemberId && user.externalMemberId === externalMemberId)
-    );
+    return this._withFileLock(async () => {
+      const state = await this._readFileState();
+      const match = state.users.find((user) =>
+        (email && user.email && user.email.toLowerCase() === email)
+        || (externalCustomerId && user.externalCustomerId === externalCustomerId)
+        || (externalMemberId && user.externalMemberId === externalMemberId)
+      );
 
-    if (!match) {
-      const timestamp = nowIso();
-      const user = {
-        id: newId(),
-        email,
-        name,
-        plan: requestedPlan,
-        subscriptionStatus: requestedSubscriptionStatus,
-        externalCustomerId,
-        externalMemberId,
-        createdAt: timestamp,
-        updatedAt: timestamp
-      };
-      state.users.push(user);
+      if (!match) {
+        const timestamp = nowIso();
+        const user = {
+          id: newId(),
+          email,
+          name,
+          plan: requestedPlan,
+          subscriptionStatus: requestedSubscriptionStatus,
+          externalCustomerId,
+          externalMemberId,
+          createdAt: timestamp,
+          updatedAt: timestamp
+        };
+        state.users.push(user);
+        await this._writeFileState(state);
+        return mapUser(user);
+      }
+
+      const nextExternalCustomerId = match.externalCustomerId || externalCustomerId;
+      const nextExternalMemberId = match.externalMemberId || externalMemberId;
+
+      match.email = email || match.email;
+      match.name = name || match.name;
+      match.plan = requestedPlan || match.plan;
+      match.subscriptionStatus = requestedSubscriptionStatus || match.subscriptionStatus;
+      match.externalCustomerId = nextExternalCustomerId;
+      match.externalMemberId = nextExternalMemberId;
+      match.updatedAt = nowIso();
+
       await this._writeFileState(state);
-      return mapUser(user);
-    }
-
-    match.email = email || match.email;
-    match.name = name || match.name;
-    match.plan = requestedPlan || match.plan;
-    match.subscriptionStatus = requestedSubscriptionStatus || match.subscriptionStatus;
-    match.externalCustomerId = externalCustomerId || match.externalCustomerId;
-    match.externalMemberId = externalMemberId || match.externalMemberId;
-    match.updatedAt = nowIso();
-
-    await this._writeFileState(state);
-    return mapUser(match);
+      return mapUser(match);
+    });
   }
 
   async updateUserBilling(update = {}) {
@@ -401,6 +411,8 @@ class UserStore {
         return null;
       }
 
+      const resolvedExternalCustomerId = row.external_customer_id || finder.externalCustomerId || null;
+      const resolvedExternalMemberId = row.external_member_id || finder.externalMemberId || null;
       const updated = await this.pool.query(
         `
           UPDATE users
@@ -408,13 +420,13 @@ class UserStore {
             plan = $2,
             subscription_status = $3,
             email = COALESCE(NULLIF($4, ''), email),
-            external_customer_id = COALESCE(NULLIF($5, ''), external_customer_id),
-            external_member_id = COALESCE(NULLIF($6, ''), external_member_id),
+            external_customer_id = $5,
+            external_member_id = $6,
             updated_at = NOW()
           WHERE id = $1
           RETURNING id, email, name, plan, subscription_status, external_customer_id, external_member_id, created_at, updated_at
         `,
-        [row.id, plan, subscriptionStatus, finder.email, finder.externalCustomerId, finder.externalMemberId]
+        [row.id, plan, subscriptionStatus, finder.email, resolvedExternalCustomerId, resolvedExternalMemberId]
       );
 
       return mapUser({
@@ -430,26 +442,28 @@ class UserStore {
       });
     }
 
-    const state = await this._readFileState();
-    const user = state.users.find((entry) =>
-      (finder.email && entry.email && entry.email.toLowerCase() === finder.email)
-      || (finder.externalCustomerId && entry.externalCustomerId === finder.externalCustomerId)
-      || (finder.externalMemberId && entry.externalMemberId === finder.externalMemberId)
-    );
+    return this._withFileLock(async () => {
+      const state = await this._readFileState();
+      const user = state.users.find((entry) =>
+        (finder.email && entry.email && entry.email.toLowerCase() === finder.email)
+        || (finder.externalCustomerId && entry.externalCustomerId === finder.externalCustomerId)
+        || (finder.externalMemberId && entry.externalMemberId === finder.externalMemberId)
+      );
 
-    if (!user) {
-      return null;
-    }
+      if (!user) {
+        return null;
+      }
 
-    user.plan = plan;
-    user.subscriptionStatus = subscriptionStatus;
-    user.email = finder.email || user.email;
-    user.externalCustomerId = finder.externalCustomerId || user.externalCustomerId;
-    user.externalMemberId = finder.externalMemberId || user.externalMemberId;
-    user.updatedAt = nowIso();
+      user.plan = plan;
+      user.subscriptionStatus = subscriptionStatus;
+      user.email = finder.email || user.email;
+      user.externalCustomerId = user.externalCustomerId || finder.externalCustomerId;
+      user.externalMemberId = user.externalMemberId || finder.externalMemberId;
+      user.updatedAt = nowIso();
 
-    await this._writeFileState(state);
-    return mapUser(user);
+      await this._writeFileState(state);
+      return mapUser(user);
+    });
   }
 
   async listProjectsByUser(userId) {
@@ -515,21 +529,23 @@ class UserStore {
       });
     }
 
-    const state = await this._readFileState();
-    const timestamp = nowIso();
-    const project = {
-      id: newId(),
-      userId,
-      name,
-      settings,
-      materials,
-      selections,
-      createdAt: timestamp,
-      updatedAt: timestamp
-    };
-    state.projects.push(project);
-    await this._writeFileState(state);
-    return mapProject(project);
+    return this._withFileLock(async () => {
+      const state = await this._readFileState();
+      const timestamp = nowIso();
+      const project = {
+        id: newId(),
+        userId,
+        name,
+        settings,
+        materials,
+        selections,
+        createdAt: timestamp,
+        updatedAt: timestamp
+      };
+      state.projects.push(project);
+      await this._writeFileState(state);
+      return mapProject(project);
+    });
   }
 
   async updateProject(userId, projectId, input = {}) {
@@ -588,24 +604,26 @@ class UserStore {
       });
     }
 
-    const state = await this._readFileState();
-    const project = state.projects.find((entry) => entry.id === projectId && entry.userId === userId);
-    if (!project) {
-      return null;
-    }
+    return this._withFileLock(async () => {
+      const state = await this._readFileState();
+      const project = state.projects.find((entry) => entry.id === projectId && entry.userId === userId);
+      if (!project) {
+        return null;
+      }
 
-    if (updateName !== null) {
-      project.name = updateName || project.name;
-    }
-    if (normalizedData) {
-      project.settings = normalizedData.settings;
-      project.materials = normalizedData.materials;
-      project.selections = normalizedData.selections;
-    }
-    project.updatedAt = nowIso();
+      if (updateName !== null) {
+        project.name = updateName || project.name;
+      }
+      if (normalizedData) {
+        project.settings = normalizedData.settings;
+        project.materials = normalizedData.materials;
+        project.selections = normalizedData.selections;
+      }
+      project.updatedAt = nowIso();
 
-    await this._writeFileState(state);
-    return mapProject(project);
+      await this._writeFileState(state);
+      return mapProject(project);
+    });
   }
 
   async deleteProject(userId, projectId) {
@@ -617,14 +635,16 @@ class UserStore {
       return result.rowCount > 0;
     }
 
-    const state = await this._readFileState();
-    const before = state.projects.length;
-    state.projects = state.projects.filter((project) => !(project.id === projectId && project.userId === userId));
-    if (state.projects.length === before) {
-      return false;
-    }
-    await this._writeFileState(state);
-    return true;
+    return this._withFileLock(async () => {
+      const state = await this._readFileState();
+      const before = state.projects.length;
+      state.projects = state.projects.filter((project) => !(project.id === projectId && project.userId === userId));
+      if (state.projects.length === before) {
+        return false;
+      }
+      await this._writeFileState(state);
+      return true;
+    });
   }
 
   async listPresetsByUser(userId) {
@@ -687,20 +707,22 @@ class UserStore {
       };
     }
 
-    const state = await this._readFileState();
-    const timestamp = nowIso();
-    const preset = {
-      id: newId(),
-      userId,
-      type,
-      name,
-      data,
-      createdAt: timestamp,
-      updatedAt: timestamp
-    };
-    state.presets.push(preset);
-    await this._writeFileState(state);
-    return preset;
+    return this._withFileLock(async () => {
+      const state = await this._readFileState();
+      const timestamp = nowIso();
+      const preset = {
+        id: newId(),
+        userId,
+        type,
+        name,
+        data,
+        createdAt: timestamp,
+        updatedAt: timestamp
+      };
+      state.presets.push(preset);
+      await this._writeFileState(state);
+      return preset;
+    });
   }
 
   async updatePreset(userId, presetId, input = {}) {
@@ -739,25 +761,27 @@ class UserStore {
       };
     }
 
-    const state = await this._readFileState();
-    const preset = state.presets.find((entry) => entry.id === presetId && entry.userId === userId);
-    if (!preset) {
-      return null;
-    }
+    return this._withFileLock(async () => {
+      const state = await this._readFileState();
+      const preset = state.presets.find((entry) => entry.id === presetId && entry.userId === userId);
+      if (!preset) {
+        return null;
+      }
 
-    if (updateType !== null) {
-      preset.type = updateType || preset.type;
-    }
-    if (updateName !== null) {
-      preset.name = updateName || preset.name;
-    }
-    if (updateData !== null) {
-      preset.data = updateData;
-    }
-    preset.updatedAt = nowIso();
+      if (updateType !== null) {
+        preset.type = updateType || preset.type;
+      }
+      if (updateName !== null) {
+        preset.name = updateName || preset.name;
+      }
+      if (updateData !== null) {
+        preset.data = updateData;
+      }
+      preset.updatedAt = nowIso();
 
-    await this._writeFileState(state);
-    return preset;
+      await this._writeFileState(state);
+      return preset;
+    });
   }
 
   async deletePreset(userId, presetId) {
@@ -769,14 +793,16 @@ class UserStore {
       return result.rowCount > 0;
     }
 
-    const state = await this._readFileState();
-    const before = state.presets.length;
-    state.presets = state.presets.filter((preset) => !(preset.id === presetId && preset.userId === userId));
-    if (state.presets.length === before) {
-      return false;
-    }
-    await this._writeFileState(state);
-    return true;
+    return this._withFileLock(async () => {
+      const state = await this._readFileState();
+      const before = state.presets.length;
+      state.presets = state.presets.filter((preset) => !(preset.id === presetId && preset.userId === userId));
+      if (state.presets.length === before) {
+        return false;
+      }
+      await this._writeFileState(state);
+      return true;
+    });
   }
 }
 
