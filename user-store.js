@@ -138,7 +138,7 @@ class UserStore {
       await this.pool.query(`
         CREATE TABLE IF NOT EXISTS users (
           id TEXT PRIMARY KEY,
-          email TEXT UNIQUE,
+          email TEXT,
           name TEXT,
           plan TEXT NOT NULL DEFAULT 'free',
           subscription_status TEXT NOT NULL DEFAULT 'inactive',
@@ -169,6 +169,9 @@ class UserStore {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
 
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower_unique
+          ON users(LOWER(email))
+          WHERE email IS NOT NULL;
         CREATE UNIQUE INDEX IF NOT EXISTS idx_users_external_customer_id_unique
           ON users(external_customer_id)
           WHERE external_customer_id IS NOT NULL;
@@ -364,8 +367,6 @@ class UserStore {
                 name = COALESCE(NULLIF($3, ''), name),
                 external_customer_id = $4,
                 external_member_id = $5,
-                plan = COALESCE(NULLIF($6, ''), plan),
-                subscription_status = COALESCE(NULLIF($7, ''), subscription_status),
                 updated_at = NOW()
               WHERE id = $1
               RETURNING id, email, name, plan, subscription_status, external_customer_id, external_member_id, created_at, updated_at
@@ -375,9 +376,7 @@ class UserStore {
               email,
               name,
               resolvedExternalCustomerId,
-              resolvedExternalMemberId,
-              requestedPlan,
-              requestedSubscriptionStatus
+              resolvedExternalMemberId
             ]
           );
 
@@ -433,8 +432,6 @@ class UserStore {
 
       match.email = email || match.email;
       match.name = name || match.name;
-      match.plan = requestedPlan || match.plan;
-      match.subscriptionStatus = requestedSubscriptionStatus || match.subscriptionStatus;
       match.externalCustomerId = nextExternalCustomerId;
       match.externalMemberId = nextExternalMemberId;
       match.updatedAt = nowIso();

@@ -200,8 +200,29 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   });
   assert.equal(billingWrongMemberRes.status, 404);
 
+  const userALoginAfterBilling = JSON.stringify({
+    email: "user-a@example.com",
+    name: "User A",
+    externalMemberId: "member-a",
+    plan: "free",
+    subscriptionStatus: "inactive"
+  });
+  const tsAfterBilling = String(Date.now());
+  const sigAfterBilling = signIdentity(process.env.IDENTITY_SHARED_SECRET, tsAfterBilling, userALoginAfterBilling);
+  const ssoAfterBillingRes = await jsonRequest(baseUrl, "/api/auth/sso", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-identity-timestamp": tsAfterBilling,
+      "x-identity-signature": sigAfterBilling
+    },
+    body: userALoginAfterBilling
+  });
+  assert.equal(ssoAfterBillingRes.status, 200);
+  const sessionAfterBillingCookie = ssoAfterBillingRes.headers.get("set-cookie");
+
   const configProRes = await jsonRequest(baseUrl, "/api/config", {
-    headers: { cookie: sessionCookieA }
+    headers: { cookie: sessionAfterBillingCookie || sessionCookieA }
   });
   assert.equal(configProRes.status, 200);
   const configPro = await configProRes.json();

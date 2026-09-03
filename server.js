@@ -8,12 +8,12 @@ const { createUserStore } = require("./user-store");
 const PORT = process.env.PORT || 3000;
 const DATA_FILE = process.env.LEGACY_STORE_FILE || path.join(__dirname, "data", "store.json");
 const PUBLIC_USER_ID = "public";
-const USER_ID_REGEX = /^[a-zA-Z0-9_-]{6,80}$/;
 const SERVE_STATIC = process.env.SERVE_STATIC !== "false";
 
 const SESSION_COOKIE_NAME = "cabinet_session";
 const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 24 * 30);
 const PRO_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "paid"]);
+let legacyStoreQueue = Promise.resolve();
 
 const configuredOrigins = (process.env.CORS_ORIGINS || "")
   .split(",")
@@ -228,6 +228,17 @@ async function writeStore(store) {
   await fs.writeFile(DATA_FILE, JSON.stringify(normalized, null, 2), "utf8");
 }
 
+function mutateLegacyStore(mutator) {
+  const run = legacyStoreQueue.then(async () => {
+    const store = await readStore();
+    const result = await mutator(store);
+    await writeStore(store);
+    return result;
+  });
+  legacyStoreQueue = run.catch(() => {});
+  return run;
+}
+
 function defaultCatalog() {
   return {
     doorStyles: [
@@ -436,20 +447,9 @@ function normalizeStore(store) {
   return { users };
 }
 
-function normalizeUserId(value) {
-  if (!value) {
-    return PUBLIC_USER_ID;
-  }
-  const safe = String(value).trim();
-  if (!USER_ID_REGEX.test(safe)) {
-    return PUBLIC_USER_ID;
-  }
-  return safe;
-}
-
 function catalogScopeUserId(req) {
   if (req.currentUser && req.currentUser.id) {
-    return normalizeUserId(req.currentUser.id);
+    return `auth:${req.currentUser.id}`;
   }
   return PUBLIC_USER_ID;
 }
@@ -731,16 +731,17 @@ function createApp(options = {}) {
 
   app.put("/api/settings", requireAuth, async (req, res) => {
     try {
-      const store = await readStore();
-      const userStoreRecord = getUserStore(store, catalogScopeUserId(req));
       const body = req.body || {};
-      userStoreRecord.settings = {
-        ...userStoreRecord.settings,
-        unitSystem: body.unitSystem === "metric" ? "metric" : "in",
-        precision: typeof body.precision === "string" ? body.precision : userStoreRecord.settings.precision
-      };
-      await writeStore(store);
-      res.json(userStoreRecord.settings);
+      const settings = await mutateLegacyStore(async (store) => {
+        const userStoreRecord = getUserStore(store, catalogScopeUserId(req));
+        userStoreRecord.settings = {
+          ...userStoreRecord.settings,
+          unitSystem: body.unitSystem === "metric" ? "metric" : "in",
+          precision: typeof body.precision === "string" ? body.precision : userStoreRecord.settings.precision
+        };
+        return userStoreRecord.settings;
+      });
+      res.json(settings);
     } catch (_err) {
       res.status(500).json({ error: "Could not update settings." });
     }
@@ -749,11 +750,12 @@ function createApp(options = {}) {
   function listHandlers({ listKey, pathBase }) {
     app.post(`/api/${pathBase}`, requireAuth, async (req, res) => {
       try {
-        const store = await readStore();
-        const userStoreRecord = getUserStore(store, catalogScopeUserId(req));
-        const item = { id: crypto.randomUUID(), ...(req.body || {}) };
-        userStoreRecord[listKey].push(item);
-        await writeStore(store);
+        const item = await mutateLegacyStore(async (store) => {
+          const userStoreRecord = getUserStore(store, catalogScopeUserId(req));
+          const nextItem = { id: crypto.randomUUID(), ...(req.body || {}) };
+          userStoreRecord[listKey].push(nextItem);
+          return nextItem;
+        });
         res.status(201).json(item);
       } catch (_err) {
         res.status(500).json({ error: `Could not save ${pathBase}.` });
@@ -762,17 +764,21 @@ function createApp(options = {}) {
 
     app.put(`/api/${pathBase}/:id`, requireAuth, async (req, res) => {
       try {
-        const store = await readStore();
-        const userStoreRecord = getUserStore(store, catalogScopeUserId(req));
-        const idx = userStoreRecord[listKey].findIndex((item) => item.id === req.params.id);
+        const updated = await mutateLegacyStore(async (store) => {
+          const userStoreRecord = getUserStore(store, catalogScopeUserId(req));
+          const idx = userStoreRecord[listKey].findIndex((item) => item.id === req.params.id);
+          if (idx < 0) {
+            return null;
+          }
+          userStoreRecord[listKey][idx] = { ...userStoreRecord[listKey][idx], ...(req.body || {}) };
+          return userStoreRecord[listKey][idx];
+        });
 
-        if (idx < 0) {
+        if (!updated) {
           return res.status(404).json({ error: "Item not found." });
         }
 
-        userStoreRecord[listKey][idx] = { ...userStoreRecord[listKey][idx], ...(req.body || {}) };
-        await writeStore(store);
-        res.json(userStoreRecord[listKey][idx]);
+        res.json(updated);
       } catch (_err) {
         res.status(500).json({ error: `Could not update ${pathBase}.` });
       }
@@ -780,16 +786,17 @@ function createApp(options = {}) {
 
     app.delete(`/api/${pathBase}/:id`, requireAuth, async (req, res) => {
       try {
-        const store = await readStore();
-        const userStoreRecord = getUserStore(store, catalogScopeUserId(req));
-        const before = userStoreRecord[listKey].length;
-        userStoreRecord[listKey] = userStoreRecord[listKey].filter((item) => item.id !== req.params.id);
+        const deleted = await mutateLegacyStore(async (store) => {
+          const userStoreRecord = getUserStore(store, catalogScopeUserId(req));
+          const before = userStoreRecord[listKey].length;
+          userStoreRecord[listKey] = userStoreRecord[listKey].filter((item) => item.id !== req.params.id);
+          return userStoreRecord[listKey].length !== before;
+        });
 
-        if (userStoreRecord[listKey].length === before) {
+        if (!deleted) {
           return res.status(404).json({ error: "Item not found." });
         }
 
-        await writeStore(store);
         res.status(204).send();
       } catch (_err) {
         res.status(500).json({ error: `Could not delete ${pathBase}.` });
