@@ -13,7 +13,11 @@ const SERVE_STATIC = process.env.SERVE_STATIC !== "false";
 
 const SESSION_COOKIE_NAME = "cabinet_session";
 const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 24 * 30);
-const PRO_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "paid"]);
+const PRO_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "paid", "pending"]);
+const PAID_ORDER_STATUSES = new Set(["ACTIVE", "PENDING"]);
+const DENIED_ORDER_STATUSES = new Set(["CANCELED", "ENDED", "PAUSED", "REFUNDED", "FAILED"]);
+const DEFAULT_PAID_PLAN_NAMES = ["Doors and Drawers Cutlister", "Job Cost Estimation"];
+const RETENTION_MONTHS = Number(process.env.DATA_RETENTION_MONTHS || 13);
 let legacyStoreQueue = Promise.resolve();
 const STATIC_FILES = new Set([
   "index.html",
@@ -200,6 +204,152 @@ function billingTrusted(req) {
     return false;
   }
   return safeCompare(provided, sharedSecret);
+}
+
+function parseCsvEnv(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function paidPlanIds() {
+  return new Set(parseCsvEnv(process.env.WIX_PAID_PLAN_IDS));
+}
+
+function paidPlanNames() {
+  const configured = parseCsvEnv(process.env.WIX_PAID_PLAN_NAMES);
+  return new Set((configured.length ? configured : DEFAULT_PAID_PLAN_NAMES).map((name) => name.toLowerCase()));
+}
+
+function normalizeOrderStatus(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function normalizePaymentStatus(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function mapWixStatusToSubscriptionStatus(status) {
+  const normalized = normalizeOrderStatus(status);
+  if (normalized === "ACTIVE") {
+    return "active";
+  }
+  if (normalized === "PENDING") {
+    return "pending";
+  }
+  return "inactive";
+}
+
+function hasPaidWixAccess(orders = []) {
+  const ids = paidPlanIds();
+  const names = paidPlanNames();
+  const useIds = ids.size > 0;
+
+  return orders.some((order) => {
+    const status = normalizeOrderStatus(order.status);
+    const paymentStatus = normalizePaymentStatus(order.paymentStatus);
+    if (!PAID_ORDER_STATUSES.has(status) || paymentStatus !== "PAID") {
+      return false;
+    }
+    if (useIds) {
+      return ids.has(String(order.planId || "").trim());
+    }
+    return names.has(String(order.planName || "").trim().toLowerCase());
+  });
+}
+
+function canDenyFromWixOrders(orders = []) {
+  return orders.some((order) => DENIED_ORDER_STATUSES.has(normalizeOrderStatus(order.status)));
+}
+
+async function getWixOrdersForMember(memberId, fetchImpl = fetch) {
+  const wixApiToken = process.env.WIX_API_TOKEN || "";
+  if (!memberId || !wixApiToken) {
+    return null;
+  }
+
+  const url = new URL("https://www.wixapis.com/pricing-plans/v2/orders");
+  url.searchParams.append("buyerIds", memberId);
+  url.searchParams.append("orderStatuses", "ACTIVE");
+  url.searchParams.append("orderStatuses", "PENDING");
+
+  const response = await fetchImpl(url.toString(), {
+    method: "GET",
+    headers: {
+      Authorization: "Bearer " + wixApiToken,
+      "Content-Type": "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Wix orders request failed with ${response.status}.`);
+  }
+
+  const body = await response.json();
+  if (Array.isArray(body.orders)) {
+    return body.orders;
+  }
+  if (body && body.orders && Array.isArray(body.orders.results)) {
+    return body.orders.results;
+  }
+  if (body && body.data && Array.isArray(body.data.orders)) {
+    return body.data.orders;
+  }
+  return [];
+}
+
+async function evaluateSaveAccessForUser(user, userStore, fetchImpl = fetch) {
+  if (!user) {
+    return { allowed: false, reason: "unauthenticated" };
+  }
+
+  if (resolvePlanForUser(user) === "pro") {
+    return { allowed: true, reason: "stored-entitlement" };
+  }
+
+  const memberId = user.externalMemberId || "";
+  const wixOrders = await getWixOrdersForMember(memberId, fetchImpl);
+  if (!wixOrders) {
+    return { allowed: false, reason: "no-wix-member-or-token" };
+  }
+
+  const allowed = hasPaidWixAccess(wixOrders);
+  if (allowed) {
+    const matchingOrder = wixOrders.find((order) => {
+      const status = normalizeOrderStatus(order.status);
+      const paymentStatus = normalizePaymentStatus(order.paymentStatus);
+      return PAID_ORDER_STATUSES.has(status) && paymentStatus === "PAID";
+    }) || null;
+
+    const subscriptionStatus = mapWixStatusToSubscriptionStatus(matchingOrder ? matchingOrder.status : "ACTIVE");
+    const updatedUser = await userStore.updateUserBilling({
+      userId: user.id,
+      email: user.email,
+      externalMemberId: user.externalMemberId,
+      externalCustomerId: user.externalCustomerId,
+      plan: "pro",
+      subscriptionStatus
+    });
+    return {
+      allowed: true,
+      reason: "wix-order",
+      user: updatedUser || user
+    };
+  }
+
+  if (canDenyFromWixOrders(wixOrders)) {
+    await userStore.updateUserBilling({
+      userId: user.id,
+      email: user.email,
+      externalMemberId: user.externalMemberId,
+      externalCustomerId: user.externalCustomerId,
+      plan: "free",
+      subscriptionStatus: "inactive"
+    });
+  }
+
+  return { allowed: false, reason: "no-active-paid-order" };
 }
 
 function resolvePlanForUser(user) {
@@ -489,6 +639,7 @@ function attachRawBody(req, _res, buffer) {
 function createApp(options = {}) {
   const app = express();
   const sessionSecret = getSessionSecret();
+  const wixFetch = options.wixFetch || fetch;
   const requestRateLimiter = rateLimit({
     windowMs: 60 * 1000,
     limit: 600,
@@ -552,6 +703,25 @@ function createApp(options = {}) {
       return;
     }
     next();
+  }
+
+  async function requireSubscriber(req, res, next) {
+    try {
+      const check = await evaluateSaveAccessForUser(req.currentUser, userStore, wixFetch);
+      if (!check.allowed) {
+        res.status(403).json({
+          error: "Active paid subscription required.",
+          reason: check.reason
+        });
+        return;
+      }
+      if (check.user) {
+        req.currentUser = check.user;
+      }
+      next();
+    } catch (_err) {
+      res.status(503).json({ error: "Could not verify subscription access." });
+    }
   }
 
   app.get("/api/health", (_req, res) => {
@@ -656,6 +826,23 @@ function createApp(options = {}) {
     }
   });
 
+  app.post("/api/can-save", requireAuth, async (req, res) => {
+    try {
+      await userStoreReady;
+      const check = await evaluateSaveAccessForUser(req.currentUser, userStore, wixFetch);
+      if (check.user) {
+        req.currentUser = check.user;
+      }
+      res.json({
+        allowed: check.allowed,
+        reason: check.reason,
+        retentionMonths: RETENTION_MONTHS
+      });
+    } catch (_err) {
+      res.status(503).json({ allowed: false, error: "Could not verify subscription access." });
+    }
+  });
+
   app.get("/api/store", async (req, res) => {
     try {
       await userStoreReady;
@@ -678,7 +865,7 @@ function createApp(options = {}) {
     }
   });
 
-  app.post("/api/projects", requireAuth, async (req, res) => {
+  app.post("/api/projects", requireAuth, requireSubscriber, async (req, res) => {
     try {
       await userStoreReady;
       const project = await userStore.createProject(req.currentUser.id, req.body || {});
@@ -692,7 +879,7 @@ function createApp(options = {}) {
     }
   });
 
-  app.put("/api/projects/:id", requireAuth, async (req, res) => {
+  app.put("/api/projects/:id", requireAuth, requireSubscriber, async (req, res) => {
     try {
       await userStoreReady;
       const project = await userStore.updateProject(req.currentUser.id, req.params.id, req.body || {});
@@ -706,7 +893,7 @@ function createApp(options = {}) {
     }
   });
 
-  app.delete("/api/projects/:id", requireAuth, async (req, res) => {
+  app.delete("/api/projects/:id", requireAuth, requireSubscriber, async (req, res) => {
     try {
       await userStoreReady;
       const deleted = await userStore.deleteProject(req.currentUser.id, req.params.id);
@@ -730,7 +917,7 @@ function createApp(options = {}) {
     }
   });
 
-  app.post("/api/presets", requireAuth, async (req, res) => {
+  app.post("/api/presets", requireAuth, requireSubscriber, async (req, res) => {
     try {
       await userStoreReady;
       const preset = await userStore.createPreset(req.currentUser.id, req.body || {});
@@ -744,7 +931,7 @@ function createApp(options = {}) {
     }
   });
 
-  app.put("/api/presets/:id", requireAuth, async (req, res) => {
+  app.put("/api/presets/:id", requireAuth, requireSubscriber, async (req, res) => {
     try {
       await userStoreReady;
       const preset = await userStore.updatePreset(req.currentUser.id, req.params.id, req.body || {});
@@ -758,7 +945,7 @@ function createApp(options = {}) {
     }
   });
 
-  app.delete("/api/presets/:id", requireAuth, async (req, res) => {
+  app.delete("/api/presets/:id", requireAuth, requireSubscriber, async (req, res) => {
     try {
       await userStoreReady;
       const deleted = await userStore.deletePreset(req.currentUser.id, req.params.id);
@@ -772,7 +959,7 @@ function createApp(options = {}) {
     }
   });
 
-  app.put("/api/settings", requireAuth, async (req, res) => {
+  app.put("/api/settings", requireAuth, requireSubscriber, async (req, res) => {
     try {
       const body = req.body || {};
       const settings = await mutateLegacyStore(async (store) => {
@@ -791,7 +978,7 @@ function createApp(options = {}) {
   });
 
   function listHandlers({ listKey, pathBase }) {
-    app.post(`/api/${pathBase}`, requireAuth, async (req, res) => {
+    app.post(`/api/${pathBase}`, requireAuth, requireSubscriber, async (req, res) => {
       try {
         const item = await mutateLegacyStore(async (store) => {
           const userStoreRecord = getUserStore(store, catalogScopeUserId(req));
@@ -805,7 +992,7 @@ function createApp(options = {}) {
       }
     });
 
-    app.put(`/api/${pathBase}/:id`, requireAuth, async (req, res) => {
+    app.put(`/api/${pathBase}/:id`, requireAuth, requireSubscriber, async (req, res) => {
       try {
         const updated = await mutateLegacyStore(async (store) => {
           const userStoreRecord = getUserStore(store, catalogScopeUserId(req));
@@ -827,7 +1014,7 @@ function createApp(options = {}) {
       }
     });
 
-    app.delete(`/api/${pathBase}/:id`, requireAuth, async (req, res) => {
+    app.delete(`/api/${pathBase}/:id`, requireAuth, requireSubscriber, async (req, res) => {
       try {
         const deleted = await mutateLegacyStore(async (store) => {
           const userStoreRecord = getUserStore(store, catalogScopeUserId(req));

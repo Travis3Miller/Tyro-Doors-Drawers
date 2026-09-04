@@ -14,7 +14,11 @@ This project is configured for:
 4. In the web service environment, set:
    - `IDENTITY_SHARED_SECRET`
    - `BILLING_WEBHOOK_SECRET`
+   - `WIX_API_TOKEN`
+   - `WIX_PAID_PLAN_IDS` (recommended)
    - `WIX_UPGRADE_URL`
+   - optional `WIX_PAID_PLAN_NAMES` fallback
+   - optional `DATA_RETENTION_MONTHS` (default 13)
 5. `SESSION_SECRET` is generated automatically.
 6. `DATABASE_URL` is automatically wired from Render Postgres.
 
@@ -35,7 +39,22 @@ Send billing updates to `POST /api/billing/webhook` and authenticate with:
 
 Use `BILLING_WEBHOOK_SECRET` as the shared secret.
 
-## 4. Frontend API base URL
+## 4. Configure Wix paywall entitlement
+
+The backend enforces paid-only save/customize server-side.
+
+- Endpoint: `POST /api/can-save`
+- Requires signed-in session.
+- Checks Wix Pricing Plan orders for the authenticated member (`externalMemberId`) with:
+  - statuses `ACTIVE` or `PENDING`
+  - `paymentStatus = PAID`
+  - matching plan IDs (`WIX_PAID_PLAN_IDS`) or plan names (`WIX_PAID_PLAN_NAMES`)
+
+Write operations (projects, presets, settings, and catalog customization routes) are blocked unless entitlement passes.
+
+Data is retained and not auto-deleted before 13 months of inactivity.
+
+## 5. Frontend API base URL
 
 Set `config.js`:
 
@@ -45,7 +64,7 @@ window.CUTLISTER_CONFIG = {
 };
 ```
 
-## 5. Local development
+## 6. Local development
 
 - Run `npm install`
 - Run `npm start`

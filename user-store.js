@@ -442,6 +442,7 @@ class UserStore {
   }
 
   async updateUserBilling(update = {}) {
+    const userId = update.userId ? String(update.userId).trim() : "";
     const finder = {
       email: update.email ? String(update.email).trim().toLowerCase() : "",
       externalCustomerId: update.externalCustomerId ? String(update.externalCustomerId).trim() : "",
@@ -449,15 +450,27 @@ class UserStore {
         ? String(update.externalMemberId).trim()
         : update.memberId
           ? String(update.memberId).trim()
-          : update.id
-            ? String(update.id).trim()
             : ""
     };
     const plan = normalizePlan(update.plan, "free");
     const subscriptionStatus = normalizeStatus(update.subscriptionStatus, "inactive");
 
     if (this.mode === "postgres") {
-      const row = await this._findUserByIdentityPostgres(this.pool, finder);
+      let row = null;
+      if (userId) {
+        const byId = await this.pool.query(
+          `
+            SELECT id, email, name, plan, subscription_status, external_customer_id, external_member_id, created_at, updated_at
+            FROM users
+            WHERE id = $1
+            LIMIT 1
+          `,
+          [userId]
+        );
+        row = byId.rows[0] || null;
+      } else {
+        row = await this._findUserByIdentityPostgres(this.pool, finder);
+      }
       if (!row) {
         return null;
       }
@@ -495,7 +508,9 @@ class UserStore {
 
     return this._withFileLock(async () => {
       const state = await this._readFileState();
-      const user = resolveIdentityMatch(state.users, finder);
+      const user = userId
+        ? state.users.find((entry) => entry.id === userId) || null
+        : resolveIdentityMatch(state.users, finder);
 
       if (!user) {
         return null;
