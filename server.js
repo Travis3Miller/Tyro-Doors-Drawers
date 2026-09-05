@@ -119,10 +119,38 @@ function serializeCookie(name, value, options = {}) {
 
 function getSessionSecret() {
   const secret = process.env.SESSION_SECRET || "";
-  if (!secret) {
-    throw new Error("SESSION_SECRET is required.");
+  if (secret) {
+    return { secret, mode: "configured" };
   }
-  return secret;
+  const persistentFallbacks = [
+    ["IDENTITY_SHARED_SECRET", process.env.IDENTITY_SHARED_SECRET || ""],
+    ["BILLING_WEBHOOK_SECRET", process.env.BILLING_WEBHOOK_SECRET || ""],
+    ["WIX_API_TOKEN", process.env.WIX_API_TOKEN || ""],
+    ["DATABASE_URL", process.env.DATABASE_URL || ""]
+  ];
+  const persistentFallback = persistentFallbacks.find(([, value]) => value);
+  if (persistentFallback) {
+    const [sourceName, sourceValue] = persistentFallback;
+    const deploymentSalt = [
+      process.env.RENDER_SERVICE_ID || "",
+      process.env.RENDER_EXTERNAL_URL || "",
+      process.env.RENDER_SERVICE_NAME || "",
+      process.env.DATABASE_URL || "",
+      process.env.CORS_ORIGINS || "",
+      __dirname
+    ].join("|");
+    return {
+      secret: signHmac(`derived-session-secret:${deploymentSalt}`, sourceValue),
+      mode: `derived:${sourceName}`
+    };
+  }
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("SESSION_SECRET is required when no persistent fallback secret is available.");
+  }
+  return {
+    secret: crypto.randomBytes(32).toString("hex"),
+    mode: "ephemeral"
+  };
 }
 
 function createSessionToken(payload, secret) {
@@ -638,7 +666,12 @@ function attachRawBody(req, _res, buffer) {
 
 function createApp(options = {}) {
   const app = express();
-  const sessionSecret = getSessionSecret();
+  const { secret: sessionSecret, mode: sessionSecretMode } = getSessionSecret();
+  if (sessionSecretMode === "ephemeral") {
+    console.warn("SESSION_SECRET is not set. Using an ephemeral in-memory secret; sessions will be reset on restart.");
+  } else if (sessionSecretMode.startsWith("derived:")) {
+    console.warn(`SESSION_SECRET is not set. Deriving the session signing secret from ${sessionSecretMode.slice(8)}; set SESSION_SECRET for an explicit persistent secret.`);
+  }
   const wixFetch = options.wixFetch || fetch;
   const requestRateLimiter = rateLimit({
     windowMs: 60 * 1000,

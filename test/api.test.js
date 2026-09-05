@@ -14,7 +14,8 @@ const originalEnv = {
   WIX_PAID_PLAN_IDS: process.env.WIX_PAID_PLAN_IDS,
   USER_STORE_FILE: process.env.USER_STORE_FILE,
   LEGACY_STORE_FILE: process.env.LEGACY_STORE_FILE,
-  WIX_UPGRADE_URL: process.env.WIX_UPGRADE_URL
+  WIX_UPGRADE_URL: process.env.WIX_UPGRADE_URL,
+  RENDER_SERVICE_ID: process.env.RENDER_SERVICE_ID
 };
 
 function signIdentity(secret, timestamp, body) {
@@ -23,6 +24,12 @@ function signIdentity(secret, timestamp, body) {
 
 function jsonRequest(baseUrl, route, options = {}) {
   return fetch(`${baseUrl}${route}`, options);
+}
+
+function loadServerModule() {
+  const modulePath = require.resolve("../server");
+  delete require.cache[modulePath];
+  return require("../server");
 }
 
 test("health/config, auth session, project isolation, and billing entitlement", async (t) => {
@@ -69,7 +76,7 @@ test("health/config, auth session, project isolation, and billing entitlement", 
     }), { status: 200, headers: { "content-type": "application/json" } });
   };
 
-  const { startServer } = require("../server");
+  const { startServer } = loadServerModule();
   const { server } = await startServer({ port: 0, wixFetch });
 
   t.after(async () => {
@@ -306,4 +313,113 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   assert.equal(configProRes.status, 200);
   const configPro = await configProRes.json();
   assert.equal(configPro.plan, "pro");
+});
+
+test("server boots without SESSION_SECRET and keeps sessions valid across restarts when another secret is configured", async (t) => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "tyro-dd-"));
+  const userStoreFile = path.join(tempDir, "user-store.json");
+  const legacyStoreFile = path.join(tempDir, "legacy-store.json");
+
+  process.env.NODE_ENV = "test";
+  delete process.env.SESSION_SECRET;
+  process.env.IDENTITY_SHARED_SECRET = "identity-secret";
+  process.env.BILLING_WEBHOOK_SECRET = "billing-secret";
+  process.env.WIX_API_TOKEN = "";
+  process.env.WIX_PAID_PLAN_IDS = "plan-doors";
+  process.env.USER_STORE_FILE = userStoreFile;
+  process.env.LEGACY_STORE_FILE = legacyStoreFile;
+  process.env.WIX_UPGRADE_URL = "https://example.com/upgrade";
+  process.env.RENDER_SERVICE_ID = "render-service-a";
+
+  let { startServer } = loadServerModule();
+  const { server } = await startServer({ port: 0 });
+  let restartedServer = null;
+
+  t.after(async () => {
+    if (server.listening) {
+      await new Promise((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      });
+    }
+    if (restartedServer && restartedServer.listening) {
+      await new Promise((resolve, reject) => {
+        restartedServer.close((err) => (err ? reject(err) : resolve()));
+      });
+    }
+    if (originalEnv.NODE_ENV === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = originalEnv.NODE_ENV;
+    if (originalEnv.SESSION_SECRET === undefined) delete process.env.SESSION_SECRET; else process.env.SESSION_SECRET = originalEnv.SESSION_SECRET;
+    if (originalEnv.IDENTITY_SHARED_SECRET === undefined) delete process.env.IDENTITY_SHARED_SECRET; else process.env.IDENTITY_SHARED_SECRET = originalEnv.IDENTITY_SHARED_SECRET;
+    if (originalEnv.BILLING_WEBHOOK_SECRET === undefined) delete process.env.BILLING_WEBHOOK_SECRET; else process.env.BILLING_WEBHOOK_SECRET = originalEnv.BILLING_WEBHOOK_SECRET;
+    if (originalEnv.WIX_API_TOKEN === undefined) delete process.env.WIX_API_TOKEN; else process.env.WIX_API_TOKEN = originalEnv.WIX_API_TOKEN;
+    if (originalEnv.WIX_PAID_PLAN_IDS === undefined) delete process.env.WIX_PAID_PLAN_IDS; else process.env.WIX_PAID_PLAN_IDS = originalEnv.WIX_PAID_PLAN_IDS;
+    if (originalEnv.USER_STORE_FILE === undefined) delete process.env.USER_STORE_FILE; else process.env.USER_STORE_FILE = originalEnv.USER_STORE_FILE;
+    if (originalEnv.LEGACY_STORE_FILE === undefined) delete process.env.LEGACY_STORE_FILE; else process.env.LEGACY_STORE_FILE = originalEnv.LEGACY_STORE_FILE;
+    if (originalEnv.WIX_UPGRADE_URL === undefined) delete process.env.WIX_UPGRADE_URL; else process.env.WIX_UPGRADE_URL = originalEnv.WIX_UPGRADE_URL;
+    if (originalEnv.RENDER_SERVICE_ID === undefined) delete process.env.RENDER_SERVICE_ID; else process.env.RENDER_SERVICE_ID = originalEnv.RENDER_SERVICE_ID;
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  const addr = server.address();
+  const baseUrl = `http://127.0.0.1:${addr.port}`;
+  const userIdentity = JSON.stringify({
+    email: "fallback@example.com",
+    name: "Fallback User",
+    externalMemberId: "member-fallback"
+  });
+  const timestamp = String(Date.now());
+  const signature = signIdentity(process.env.IDENTITY_SHARED_SECRET, timestamp, userIdentity);
+
+  const ssoRes = await jsonRequest(baseUrl, "/api/auth/sso", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-identity-timestamp": timestamp,
+      "x-identity-signature": signature
+    },
+    body: userIdentity
+  });
+
+  assert.equal(ssoRes.status, 200);
+  const sessionCookie = ssoRes.headers.get("set-cookie");
+  assert.ok(sessionCookie && sessionCookie.includes("cabinet_session="));
+
+  const sessionRes = await jsonRequest(baseUrl, "/api/auth/session", {
+    headers: { cookie: sessionCookie }
+  });
+  assert.equal(sessionRes.status, 200);
+  const sessionBody = await sessionRes.json();
+  assert.equal(sessionBody.authenticated, true);
+  assert.equal(sessionBody.user.email, "fallback@example.com");
+
+  await new Promise((resolve, reject) => {
+    server.close((err) => (err ? reject(err) : resolve()));
+  });
+
+  ({ startServer } = loadServerModule());
+  ({ server: restartedServer } = await startServer({ port: 0 }));
+
+  const restartedAddr = restartedServer.address();
+  const restartedBaseUrl = `http://127.0.0.1:${restartedAddr.port}`;
+  const restartedSessionRes = await jsonRequest(restartedBaseUrl, "/api/auth/session", {
+    headers: { cookie: sessionCookie }
+  });
+  assert.equal(restartedSessionRes.status, 200);
+  const restartedSessionBody = await restartedSessionRes.json();
+  assert.equal(restartedSessionBody.authenticated, true);
+  assert.equal(restartedSessionBody.user.email, "fallback@example.com");
+
+  await new Promise((resolve, reject) => {
+    restartedServer.close((err) => (err ? reject(err) : resolve()));
+  });
+
+  process.env.RENDER_SERVICE_ID = "render-service-b";
+  ({ startServer } = loadServerModule());
+  ({ server: restartedServer } = await startServer({ port: 0 }));
+
+  const isolatedSessionRes = await jsonRequest(`http://127.0.0.1:${restartedServer.address().port}`, "/api/auth/session", {
+    headers: { cookie: sessionCookie }
+  });
+  assert.equal(isolatedSessionRes.status, 200);
+  const isolatedSessionBody = await isolatedSessionRes.json();
+  assert.equal(isolatedSessionBody.authenticated, false);
 });
