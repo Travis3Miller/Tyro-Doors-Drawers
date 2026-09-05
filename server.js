@@ -131,8 +131,16 @@ function getSessionSecret() {
   const persistentFallback = persistentFallbacks.find(([, value]) => value);
   if (persistentFallback) {
     const [sourceName, sourceValue] = persistentFallback;
+    const deploymentSalt = [
+      process.env.RENDER_SERVICE_ID,
+      process.env.RENDER_EXTERNAL_URL,
+      process.env.RENDER_SERVICE_NAME,
+      process.env.DATABASE_URL,
+      process.env.CORS_ORIGINS,
+      __dirname
+    ].find(Boolean) || "local-development";
     return {
-      secret: signHmac("derived-session-secret", sourceValue),
+      secret: signHmac(`derived-session-secret:${deploymentSalt}`, sourceValue),
       mode: `derived:${sourceName}`
     };
   }

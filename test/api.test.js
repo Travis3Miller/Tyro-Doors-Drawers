@@ -14,7 +14,8 @@ const originalEnv = {
   WIX_PAID_PLAN_IDS: process.env.WIX_PAID_PLAN_IDS,
   USER_STORE_FILE: process.env.USER_STORE_FILE,
   LEGACY_STORE_FILE: process.env.LEGACY_STORE_FILE,
-  WIX_UPGRADE_URL: process.env.WIX_UPGRADE_URL
+  WIX_UPGRADE_URL: process.env.WIX_UPGRADE_URL,
+  RENDER_SERVICE_ID: process.env.RENDER_SERVICE_ID
 };
 
 function signIdentity(secret, timestamp, body) {
@@ -322,6 +323,7 @@ test("server boots without SESSION_SECRET and keeps sessions valid across restar
   process.env.USER_STORE_FILE = userStoreFile;
   process.env.LEGACY_STORE_FILE = legacyStoreFile;
   process.env.WIX_UPGRADE_URL = "https://example.com/upgrade";
+  process.env.RENDER_SERVICE_ID = "render-service-a";
 
   const { startServer } = require("../server");
   const { server } = await startServer({ port: 0 });
@@ -347,6 +349,7 @@ test("server boots without SESSION_SECRET and keeps sessions valid across restar
     if (originalEnv.USER_STORE_FILE === undefined) delete process.env.USER_STORE_FILE; else process.env.USER_STORE_FILE = originalEnv.USER_STORE_FILE;
     if (originalEnv.LEGACY_STORE_FILE === undefined) delete process.env.LEGACY_STORE_FILE; else process.env.LEGACY_STORE_FILE = originalEnv.LEGACY_STORE_FILE;
     if (originalEnv.WIX_UPGRADE_URL === undefined) delete process.env.WIX_UPGRADE_URL; else process.env.WIX_UPGRADE_URL = originalEnv.WIX_UPGRADE_URL;
+    if (originalEnv.RENDER_SERVICE_ID === undefined) delete process.env.RENDER_SERVICE_ID; else process.env.RENDER_SERVICE_ID = originalEnv.RENDER_SERVICE_ID;
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
@@ -397,4 +400,18 @@ test("server boots without SESSION_SECRET and keeps sessions valid across restar
   const restartedSessionBody = await restartedSessionRes.json();
   assert.equal(restartedSessionBody.authenticated, true);
   assert.equal(restartedSessionBody.user.email, "fallback@example.com");
+
+  await new Promise((resolve, reject) => {
+    restartedServer.close((err) => (err ? reject(err) : resolve()));
+  });
+
+  process.env.RENDER_SERVICE_ID = "render-service-b";
+  ({ server: restartedServer } = await startServer({ port: 0 }));
+
+  const isolatedSessionRes = await jsonRequest(`http://127.0.0.1:${restartedServer.address().port}`, "/api/auth/session", {
+    headers: { cookie: sessionCookie }
+  });
+  assert.equal(isolatedSessionRes.status, 200);
+  const isolatedSessionBody = await isolatedSessionRes.json();
+  assert.equal(isolatedSessionBody.authenticated, false);
 });
