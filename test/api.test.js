@@ -26,6 +26,12 @@ function jsonRequest(baseUrl, route, options = {}) {
   return fetch(`${baseUrl}${route}`, options);
 }
 
+function loadServerModule() {
+  const modulePath = require.resolve("../server");
+  delete require.cache[modulePath];
+  return require("../server");
+}
+
 test("health/config, auth session, project isolation, and billing entitlement", async (t) => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "tyro-dd-"));
   const userStoreFile = path.join(tempDir, "user-store.json");
@@ -70,7 +76,7 @@ test("health/config, auth session, project isolation, and billing entitlement", 
     }), { status: 200, headers: { "content-type": "application/json" } });
   };
 
-  const { startServer } = require("../server");
+  const { startServer } = loadServerModule();
   const { server } = await startServer({ port: 0, wixFetch });
 
   t.after(async () => {
@@ -325,7 +331,7 @@ test("server boots without SESSION_SECRET and keeps sessions valid across restar
   process.env.WIX_UPGRADE_URL = "https://example.com/upgrade";
   process.env.RENDER_SERVICE_ID = "render-service-a";
 
-  const { startServer } = require("../server");
+  let { startServer } = loadServerModule();
   const { server } = await startServer({ port: 0 });
   let restartedServer = null;
 
@@ -389,6 +395,7 @@ test("server boots without SESSION_SECRET and keeps sessions valid across restar
     server.close((err) => (err ? reject(err) : resolve()));
   });
 
+  ({ startServer } = loadServerModule());
   ({ server: restartedServer } = await startServer({ port: 0 }));
 
   const restartedAddr = restartedServer.address();
@@ -406,6 +413,7 @@ test("server boots without SESSION_SECRET and keeps sessions valid across restar
   });
 
   process.env.RENDER_SERVICE_ID = "render-service-b";
+  ({ startServer } = loadServerModule());
   ({ server: restartedServer } = await startServer({ port: 0 }));
 
   const isolatedSessionRes = await jsonRequest(`http://127.0.0.1:${restartedServer.address().port}`, "/api/auth/session", {
