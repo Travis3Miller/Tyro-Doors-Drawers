@@ -216,18 +216,8 @@ function oauthConfigured() {
   return Boolean((process.env.WIX_CLIENT_ID || "").trim() && (process.env.WIX_CLIENT_SECRET || "").trim());
 }
 
-function wixRedirectUri(req) {
-  const configured = (process.env.WIX_OAUTH_REDIRECT_URI || "").trim();
-  if (configured) {
-    return configured;
-  }
-  const forwardedProto = (req.get("x-forwarded-proto") || "").split(",")[0].trim();
-  const protocol = forwardedProto || req.protocol || "https";
-  const host = req.get("x-forwarded-host") || req.get("host") || "";
-  if (!host) {
-    return "";
-  }
-  return `${protocol}://${host}/api/auth/wix/callback`;
+function wixRedirectUri() {
+  return (process.env.WIX_OAUTH_REDIRECT_URI || "").trim();
 }
 
 async function exchangeWixAuthCode(code, redirectUri, fetchImpl = fetch) {
@@ -456,11 +446,24 @@ async function evaluateSaveAccessForUser(user, userStore, fetchImpl = fetch, tok
     return { allowed: false, reason: "unauthenticated" };
   }
 
+  const memberId = user.externalMemberId || "";
+  if (!memberId && resolvePlanForUser(user) === "pro") {
+    return { allowed: true, reason: "stored-entitlement-legacy" };
+  }
+  if (!oauthConfigured()) {
+    if (resolvePlanForUser(user) === "pro") {
+      return { allowed: true, reason: "stored-entitlement-legacy" };
+    }
+    return { allowed: false, reason: "no-wix-oauth-client" };
+  }
+
   if (!paidPlanIds().size) {
+    if (resolvePlanForUser(user) === "pro") {
+      return { allowed: true, reason: "stored-entitlement-legacy" };
+    }
     return { allowed: false, reason: "no-paid-plan-ids" };
   }
 
-  const memberId = user.externalMemberId || "";
   const wixOrders = await getWixOrdersForMember(memberId, fetchImpl, tokenCache);
   if (!wixOrders) {
     return { allowed: false, reason: "no-wix-member-or-oauth-client" };
@@ -797,6 +800,7 @@ function createApp(options = {}) {
   }
   const wixFetch = options.wixFetch || fetch;
   const wixClientTokenCache = { accessToken: "", expiresAt: 0 };
+  const wixOauthStates = new Map();
   const requestRateLimiter = rateLimit({
     windowMs: 60 * 1000,
     limit: 600,
@@ -925,15 +929,24 @@ function createApp(options = {}) {
       res.status(503).json({ error: "Wix OAuth is not configured." });
       return;
     }
-    const redirectUri = wixRedirectUri(req);
+    const redirectUri = wixRedirectUri();
     if (!redirectUri) {
-      res.status(500).json({ error: "Could not determine Wix OAuth redirect URL." });
+      res.status(503).json({ error: "Wix OAuth redirect URI is not configured." });
       return;
     }
 
+    const now = Date.now();
+    for (const [nonce, expiresAt] of wixOauthStates.entries()) {
+      if (!Number.isFinite(expiresAt) || expiresAt <= now) {
+        wixOauthStates.delete(nonce);
+      }
+    }
+
+    const nonce = crypto.randomBytes(12).toString("hex");
+    wixOauthStates.set(nonce, now + OAUTH_STATE_TTL_MS);
     const state = encodeState({
-      nonce: crypto.randomBytes(12).toString("hex"),
-      ts: Date.now()
+      nonce,
+      ts: now
     }, sessionSecret);
     const oauthUrl = new URL("https://www.wix.com/oauth/authorize");
     oauthUrl.searchParams.set("client_id", (process.env.WIX_CLIENT_ID || "").trim());
@@ -954,21 +967,37 @@ function createApp(options = {}) {
       await userStoreReady;
       const { code = "", state = "", error = "" } = req.query || {};
       if (error) {
-        res.status(401).json({ error: `Wix OAuth failed: ${error}` });
+        res.status(401).json({ error: "Wix OAuth authorization was denied." });
         return;
       }
 
       const decodedState = decodeState(state, sessionSecret);
-      if (!decodedState || !Number.isFinite(decodedState.ts) || Date.now() - decodedState.ts > OAUTH_STATE_TTL_MS) {
+      if (!decodedState || !Number.isFinite(decodedState.ts)) {
         res.status(400).json({ error: "Invalid or expired OAuth state." });
         return;
       }
+      const now = Date.now();
+      if (decodedState.ts > now || now - decodedState.ts > OAUTH_STATE_TTL_MS) {
+        res.status(400).json({ error: "Invalid or expired OAuth state." });
+        return;
+      }
+      const nonce = typeof decodedState.nonce === "string" ? decodedState.nonce : "";
+      const nonceExpiry = wixOauthStates.get(nonce);
+      if (!nonce || !Number.isFinite(nonceExpiry) || nonceExpiry <= now) {
+        res.status(400).json({ error: "Invalid or expired OAuth state." });
+        return;
+      }
+      wixOauthStates.delete(nonce);
       if (!code || typeof code !== "string") {
         res.status(400).json({ error: "Missing OAuth authorization code." });
         return;
       }
 
-      const redirectUri = wixRedirectUri(req);
+      const redirectUri = wixRedirectUri();
+      if (!redirectUri) {
+        res.status(503).json({ error: "Wix OAuth redirect URI is not configured." });
+        return;
+      }
       const accessToken = await exchangeWixAuthCode(code, redirectUri, wixFetch);
       if (!accessToken) {
         res.status(503).json({ error: "Could not exchange Wix OAuth code." });

@@ -16,9 +16,9 @@ This project is configured for:
    - `BILLING_WEBHOOK_SECRET`
    - `WIX_CLIENT_ID`
    - `WIX_CLIENT_SECRET`
+   - `WIX_OAUTH_REDIRECT_URI`
    - `WIX_PAID_PLAN_IDS` (recommended)
    - `WIX_UPGRADE_URL`
-   - optional `WIX_OAUTH_REDIRECT_URI` (defaults to `<api-origin>/api/auth/wix/callback`)
    - optional `WIX_OAUTH_SCOPE`
    - optional `DATA_RETENTION_MONTHS` (default 13)
 5. `SESSION_SECRET` is generated automatically when you deploy from `render.yaml`; if it is missing, the server derives a stable fallback from another configured backend secret so the app can still boot, but you should still set `SESSION_SECRET` explicitly for a dedicated session-signing key.

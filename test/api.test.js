@@ -50,6 +50,16 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   process.env.LEGACY_STORE_FILE = legacyStoreFile;
   process.env.WIX_UPGRADE_URL = "https://example.com/upgrade";
 
+  let wixMemberResponse = {
+    member: {
+      id: "member-oauth",
+      loginEmail: "oauth-user@example.com",
+      profile: {
+        nickname: "OAuth User"
+      }
+    }
+  };
+
   const wixFetch = async (url) => {
     if (url === "https://www.wixapis.com/oauth2/token") {
       return new Response(JSON.stringify({
@@ -64,15 +74,7 @@ test("health/config, auth session, project isolation, and billing entitlement", 
       }), { status: 200, headers: { "content-type": "application/json" } });
     }
     if (url === "https://www.wixapis.com/members/v1/members/me") {
-      return new Response(JSON.stringify({
-        member: {
-          id: "member-oauth",
-          loginEmail: "oauth-user@example.com",
-          profile: {
-            nickname: "OAuth User"
-          }
-        }
-      }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify(wixMemberResponse), { status: 200, headers: { "content-type": "application/json" } });
     }
     const parsed = new URL(url);
     const buyerId = parsed.searchParams.get("buyerIds");
@@ -155,10 +157,43 @@ test("health/config, auth session, project isolation, and billing entitlement", 
 
   const wixCallbackRes = await jsonRequest(baseUrl, `/api/auth/wix/callback?code=test-code&state=${encodeURIComponent(oauthState)}`);
   assert.equal(wixCallbackRes.status, 200);
+  const oauthSessionCookie = wixCallbackRes.headers.get("set-cookie");
+  assert.ok(oauthSessionCookie && oauthSessionCookie.includes("cabinet_session="));
   const wixCallbackBody = await wixCallbackRes.json();
   assert.equal(wixCallbackBody.authenticated, true);
   assert.equal(wixCallbackBody.user.externalMemberId, "member-oauth");
   assert.equal(wixCallbackBody.user.email, "oauth-user@example.com");
+  const wixCallbackReplayRes = await jsonRequest(baseUrl, `/api/auth/wix/callback?code=test-code&state=${encodeURIComponent(oauthState)}`);
+  assert.equal(wixCallbackReplayRes.status, 400);
+
+  const wixCallbackInvalidStateRes = await jsonRequest(baseUrl, "/api/auth/wix/callback?code=test-code&state=invalid");
+  assert.equal(wixCallbackInvalidStateRes.status, 400);
+
+  const wixCallbackErrorRes = await jsonRequest(baseUrl, "/api/auth/wix/callback?error=access_denied");
+  assert.equal(wixCallbackErrorRes.status, 401);
+
+  delete process.env.WIX_OAUTH_REDIRECT_URI;
+  const wixLoginMissingRedirectRes = await jsonRequest(baseUrl, "/api/auth/wix/login", {
+    redirect: "manual"
+  });
+  assert.equal(wixLoginMissingRedirectRes.status, 503);
+  process.env.WIX_OAUTH_REDIRECT_URI = `${baseUrl}/api/auth/wix/callback`;
+
+  wixMemberResponse = { member: { id: "", loginEmail: "" } };
+  const wixLoginInvalidMemberRes = await jsonRequest(baseUrl, "/api/auth/wix/login", {
+    redirect: "manual"
+  });
+  assert.equal(wixLoginInvalidMemberRes.status, 302);
+  const invalidMemberState = new URL(wixLoginInvalidMemberRes.headers.get("location")).searchParams.get("state");
+  const wixCallbackInvalidMemberRes = await jsonRequest(baseUrl, `/api/auth/wix/callback?code=test-code&state=${encodeURIComponent(invalidMemberState)}`);
+  assert.equal(wixCallbackInvalidMemberRes.status, 400);
+  wixMemberResponse = {
+    member: {
+      id: "member-oauth",
+      loginEmail: "oauth-user@example.com",
+      profile: { nickname: "OAuth User" }
+    }
+  };
 
   const userAIdentity = JSON.stringify({
     email: "user-a@example.com",
@@ -358,6 +393,33 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   assert.equal(configProRes.status, 200);
   const configPro = await configProRes.json();
   assert.equal(configPro.plan, "pro");
+
+  process.env.WIX_PAID_PLAN_IDS = "";
+  const canSaveLegacyProRes = await jsonRequest(baseUrl, "/api/can-save", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      cookie: sessionAfterBillingCookie || sessionCookieA
+    },
+    body: JSON.stringify({})
+  });
+  assert.equal(canSaveLegacyProRes.status, 200);
+  const canSaveLegacyPro = await canSaveLegacyProRes.json();
+  assert.equal(canSaveLegacyPro.allowed, true);
+
+  process.env.WIX_CLIENT_ID = "";
+  process.env.WIX_CLIENT_SECRET = "";
+  const canSaveLegacyNoOauthRes = await jsonRequest(baseUrl, "/api/can-save", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      cookie: sessionAfterBillingCookie || sessionCookieA
+    },
+    body: JSON.stringify({})
+  });
+  assert.equal(canSaveLegacyNoOauthRes.status, 200);
+  const canSaveLegacyNoOauth = await canSaveLegacyNoOauthRes.json();
+  assert.equal(canSaveLegacyNoOauth.allowed, true);
 });
 
 test("server boots without SESSION_SECRET and keeps sessions valid across restarts when another secret is configured", async (t) => {

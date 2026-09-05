@@ -67,12 +67,12 @@ Required for production:
 - `BILLING_WEBHOOK_SECRET`
 - `WIX_CLIENT_ID`
 - `WIX_CLIENT_SECRET`
+- `WIX_OAUTH_REDIRECT_URI`
 - `WIX_UPGRADE_URL`
 
 Optional:
 
 - `WIX_PAID_PLAN_IDS` (recommended, comma-separated Wix plan IDs)
-- `WIX_OAUTH_REDIRECT_URI` (defaults to `<api-origin>/api/auth/wix/callback` if omitted)
 - `WIX_OAUTH_SCOPE`
 - `DATA_RETENTION_MONTHS` (default `13`)
 - `CORS_ORIGINS`
