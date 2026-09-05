@@ -308,7 +308,7 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   assert.equal(configPro.plan, "pro");
 });
 
-test("server boots without SESSION_SECRET and still signs in-process sessions", async (t) => {
+test("server boots without SESSION_SECRET and keeps sessions valid across restarts when another secret is configured", async (t) => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "tyro-dd-"));
   const userStoreFile = path.join(tempDir, "user-store.json");
   const legacyStoreFile = path.join(tempDir, "legacy-store.json");
@@ -325,11 +325,19 @@ test("server boots without SESSION_SECRET and still signs in-process sessions", 
 
   const { startServer } = require("../server");
   const { server } = await startServer({ port: 0 });
+  let restartedServer = null;
 
   t.after(async () => {
-    await new Promise((resolve, reject) => {
-      server.close((err) => (err ? reject(err) : resolve()));
-    });
+    if (server.listening) {
+      await new Promise((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      });
+    }
+    if (restartedServer && restartedServer.listening) {
+      await new Promise((resolve, reject) => {
+        restartedServer.close((err) => (err ? reject(err) : resolve()));
+      });
+    }
     if (originalEnv.NODE_ENV === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = originalEnv.NODE_ENV;
     if (originalEnv.SESSION_SECRET === undefined) delete process.env.SESSION_SECRET; else process.env.SESSION_SECRET = originalEnv.SESSION_SECRET;
     if (originalEnv.IDENTITY_SHARED_SECRET === undefined) delete process.env.IDENTITY_SHARED_SECRET; else process.env.IDENTITY_SHARED_SECRET = originalEnv.IDENTITY_SHARED_SECRET;
@@ -373,4 +381,20 @@ test("server boots without SESSION_SECRET and still signs in-process sessions", 
   const sessionBody = await sessionRes.json();
   assert.equal(sessionBody.authenticated, true);
   assert.equal(sessionBody.user.email, "fallback@example.com");
+
+  await new Promise((resolve, reject) => {
+    server.close((err) => (err ? reject(err) : resolve()));
+  });
+
+  ({ server: restartedServer } = await startServer({ port: 0 }));
+
+  const restartedAddr = restartedServer.address();
+  const restartedBaseUrl = `http://127.0.0.1:${restartedAddr.port}`;
+  const restartedSessionRes = await jsonRequest(restartedBaseUrl, "/api/auth/session", {
+    headers: { cookie: sessionCookie }
+  });
+  assert.equal(restartedSessionRes.status, 200);
+  const restartedSessionBody = await restartedSessionRes.json();
+  assert.equal(restartedSessionBody.authenticated, true);
+  assert.equal(restartedSessionBody.user.email, "fallback@example.com");
 });

@@ -19,7 +19,7 @@ This project is configured for:
    - `WIX_UPGRADE_URL`
    - optional `WIX_PAID_PLAN_NAMES` fallback
    - optional `DATA_RETENTION_MONTHS` (default 13)
-5. `SESSION_SECRET` is generated automatically when you deploy from `render.yaml`; if it is missing, the server now falls back to an ephemeral in-memory secret so the app can boot, but all signed sessions will reset on restart until you set a persistent value.
+5. `SESSION_SECRET` is generated automatically when you deploy from `render.yaml`; if it is missing, the server derives a stable fallback from another configured backend secret so the app can still boot, but you should still set `SESSION_SECRET` explicitly for a dedicated session-signing key.
 6. `DATABASE_URL` is automatically wired from Render Postgres.
 
 ## 2. Configure trusted identity exchange

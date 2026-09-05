@@ -62,7 +62,7 @@ User data is retained and not auto-deleted before 13 months of inactivity (`DATA
 Required for production:
 
 - `DATABASE_URL` (Render Postgres connection string)
-- `SESSION_SECRET` (strongly recommended for stable sessions; when omitted the server falls back to an ephemeral in-memory secret and users will be signed out after a restart)
+- `SESSION_SECRET` (strongly recommended; when omitted the server derives a stable fallback from another configured backend secret, but an explicit dedicated value is still preferred)
 - `IDENTITY_SHARED_SECRET`
 - `BILLING_WEBHOOK_SECRET`
 - `WIX_API_TOKEN`
