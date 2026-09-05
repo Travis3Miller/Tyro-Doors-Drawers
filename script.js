@@ -11,6 +11,9 @@ const FRONTEND_CONFIG = window.CUTLISTER_CONFIG || {};
 const API_BASE_URL = typeof FRONTEND_CONFIG.apiBaseUrl === "string"
   ? FRONTEND_CONFIG.apiBaseUrl.trim().replace(/\/+$/, "")
   : "";
+const ASSET_BASE_URL = typeof FRONTEND_CONFIG.assetBaseUrl === "string"
+  ? FRONTEND_CONFIG.assetBaseUrl.trim().replace(/\/+$/, "")
+  : "";
 
 function createUserId() {
   if (window.crypto && typeof window.crypto.randomUUID === "function") {
@@ -38,10 +41,26 @@ function apiUrl(path) {
   return `${API_BASE_URL}${path}`;
 }
 
+function assetUrl(assetName) {
+  const cleanName = String(assetName || "").replace(/^\/+/, "");
+  if (ASSET_BASE_URL) {
+    const encodedPath = cleanName.split("/").map((part) => encodeURIComponent(part)).join("/");
+    return `${ASSET_BASE_URL}/${encodedPath}`;
+  }
+  if (API_BASE_URL) {
+    return `${API_BASE_URL}/api/assets/${encodeURIComponent(cleanName)}`;
+  }
+  return cleanName;
+}
+
 async function apiFetch(path, options = {}) {
   const headers = new Headers(options.headers || {});
   headers.set("x-user-id", getClientUserId());
-  return fetch(apiUrl(path), { ...options, headers });
+  const requestOptions = { ...options, headers };
+  if (!requestOptions.credentials) {
+    requestOptions.credentials = "include";
+  }
+  return fetch(apiUrl(path), requestOptions);
 }
 
 async function apiJson(path, options = {}) {
@@ -562,6 +581,28 @@ async function loadCatalog() {
     state.catalog = localCatalog();
     state.projects = localProjects();
     state.settings = localSettings();
+  }
+
+  async function refreshWelcomeBanner() {
+    const banner = byId("welcomeBanner");
+    if (!banner) {
+      return;
+    }
+    banner.textContent = "Welcome";
+
+    if (await ensureDataMode() !== "api") {
+      return;
+    }
+
+    try {
+      const session = await apiJson("/api/auth/session");
+      if (session && session.authenticated && session.user) {
+        const displayName = session.user.name || session.user.email || "there";
+        banner.textContent = `Welcome, ${displayName}`;
+      }
+    } catch (_err) {
+      banner.textContent = "Welcome";
+    }
   }
 }
 
@@ -1948,7 +1989,7 @@ function updateRailInputsVisibility() {
     matchRails.checked = true;
     matchRails.disabled = true;
     if (referenceImage) {
-      referenceImage.src = "assets/mitered.png";
+      referenceImage.src = assetUrl("Bottom Groove Location and Depth(Square).png");
       referenceImage.alt = "Mitered door reference showing mitered rail/stile construction.";
     }
     if (referenceTitle) {
@@ -1960,7 +2001,7 @@ function updateRailInputsVisibility() {
   } else {
     matchRails.disabled = false;
     if (referenceImage) {
-      referenceImage.src = "assets/cope-n-stick.png";
+      referenceImage.src = assetUrl("Bottom Groove Location and Depth.png");
       referenceImage.alt = "Cope N Stick reference showing X for stile/rail width, Y for groove distance, Z for panel clearance.";
     }
     if (referenceTitle) {
@@ -2240,7 +2281,7 @@ function updateDrawerConstructionReference() {
       titleText = "Custom Reference";
     }
 
-    image.src = imageName;
+    image.src = assetUrl(imageName);
     image.alt = captionText;
     if (title) {
       title.textContent = titleText;
@@ -2251,7 +2292,7 @@ function updateDrawerConstructionReference() {
 
   if (step === 2 && type === "lock") {
     const sideValue = sideRun ? sideRun.value : "length";
-    image.src = sideValue === "length" ? "LJ Long Side Dado Depth.png" : "LJ Long Front Dado Depth(SQUARE).png";
+    image.src = assetUrl(sideValue === "length" ? "LJ Long Side Dado Depth.png" : "LJ Long Front Dado Depth(SQUARE).png");
     image.alt = "Lock joint drawer reference showing dado depth (Y) and material thickness (X).";
     if (title) {
       title.textContent = "Lock Joint Reference";
@@ -2265,7 +2306,7 @@ function updateDrawerConstructionReference() {
     const frontOn = dovetailFrontEnabled ? dovetailFrontEnabled.checked : false;
     const backOn = dovetailBackEnabled ? dovetailBackEnabled.checked : false;
     if (mode === "setback") {
-      image.src = "Dovetail Side Set Back.png";
+      image.src = assetUrl("Dovetail Side Set Back.png");
       image.alt = "Dovetail side setback reference.";
       if (title) {
         title.textContent = "Dovetail Setback";
@@ -2280,7 +2321,7 @@ function updateDrawerConstructionReference() {
         caption.textContent = "Sides run long; add setbacks (X) for front/back if needed.";
       }
     } else {
-      image.src = "DT Side and Front Through.png";
+      image.src = assetUrl("DT Side and Front Through.png");
       image.alt = "Dovetail side and front through reference.";
       if (title) {
         title.textContent = "Dovetail Through";
@@ -2292,7 +2333,7 @@ function updateDrawerConstructionReference() {
 
   if (step === 2 && type === "butt") {
     const sideValue = sideRun ? sideRun.value : "length";
-    image.src = sideValue === "length" ? "ButtJoint Side Long.png" : "ButtJoint Side Short.png";
+    image.src = assetUrl(sideValue === "length" ? "ButtJoint Side Long.png" : "ButtJoint Side Short.png");
     image.alt = "Butt joint drawer reference showing which parts run long.";
     if (title) {
       title.textContent = "Butt Joint Reference";
@@ -2305,7 +2346,7 @@ function updateDrawerConstructionReference() {
 
   const showGroove = step === 3 && bottomPlacement && bottomPlacement.value === "grooved";
   if (showGroove) {
-    image.src = "Bottom Groove Location and Depth(Square).png";
+    image.src = assetUrl("Bottom Groove Location and Depth(Square).png");
     image.alt = "Drawer bottom groove reference showing X for groove width, Y for groove height, Z for groove depth.";
     if (title) {
       title.textContent = "Bottom Groove Reference";
@@ -2315,7 +2356,7 @@ function updateDrawerConstructionReference() {
   }
 
   if (step === 3 && bottomPlacement && bottomPlacement.value === "planted") {
-    image.src = "Plant-On Bottom.png";
+    image.src = assetUrl("Plant-On Bottom.png");
     image.alt = "Drawer bottom planted on the bottom reference.";
     if (title) {
       title.textContent = "Plant-On Bottom Reference";
@@ -2325,7 +2366,7 @@ function updateDrawerConstructionReference() {
   }
 
   if (step === 4) {
-    image.src = "Rear Drawer Bottom Dim.png";
+    image.src = assetUrl("Rear Drawer Bottom Dim.png");
     image.alt = "Drawer bottom sizing adjustments reference.";
     if (title) {
       title.textContent = "Drawer Bottom Sizing";
@@ -2334,7 +2375,7 @@ function updateDrawerConstructionReference() {
     return;
   }
 
-  image.src = "Bottom Groove Location and Depth(Square).png";
+  image.src = assetUrl("Bottom Groove Location and Depth(Square).png");
   image.alt = "Drawer construction reference.";
   if (title) {
     title.textContent = "Construction Reference";
@@ -3551,6 +3592,7 @@ function wireButtons() {
 
 async function init() {
   await loadCatalog();
+  await refreshWelcomeBanner();
   wireTabs();
   wireButtons();
   await refreshUi();

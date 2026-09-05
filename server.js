@@ -1,14 +1,44 @@
 const express = require("express");
 const path = require("path");
 const fs = require("fs/promises");
+const crypto = require("crypto");
 const cors = require("cors");
+const rateLimit = require("express-rate-limit");
+const { createUserStore } = require("./user-store");
 
-const app = express();
 const PORT = process.env.PORT || 3000;
-const DATA_FILE = path.join(__dirname, "data", "store.json");
+const DATA_FILE = process.env.LEGACY_STORE_FILE || path.join(__dirname, "data", "store.json");
 const PUBLIC_USER_ID = "public";
-const USER_ID_REGEX = /^[a-zA-Z0-9_-]{6,80}$/;
 const SERVE_STATIC = process.env.SERVE_STATIC !== "false";
+
+const SESSION_COOKIE_NAME = "cabinet_session";
+const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 24 * 30);
+const PRO_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "paid", "pending"]);
+const PAID_ORDER_STATUSES = new Set(["ACTIVE", "PENDING"]);
+const DENIED_ORDER_STATUSES = new Set(["CANCELED", "ENDED", "PAUSED", "REFUNDED", "FAILED"]);
+const DEFAULT_PAID_PLAN_NAMES = ["Doors and Drawers Cutlister", "Job Cost Estimation"];
+const RETENTION_MONTHS = Number(process.env.DATA_RETENTION_MONTHS || 13);
+let legacyStoreQueue = Promise.resolve();
+const STATIC_FILES = new Set([
+  "index.html",
+  "script.js",
+  "styles.css",
+  "config.js",
+  "Bottom Groove Location and Depth(Square).png",
+  "Bottom Groove Location and Depth.png",
+  "ButtJoint Drawer.jpg",
+  "ButtJoint Side Long.png",
+  "ButtJoint Side Short.png",
+  "DT Side and Front Through.png",
+  "Dovetail Drawer Box.png",
+  "Dovetail Side Set Back.png",
+  "LJ Long Front Dado Depth(SQUARE).png",
+  "LJ Long Front Dado Depth.png",
+  "LJ Long Side Dado Depth.png",
+  "LockJoint Drawer.jpg",
+  "Plant-On Bottom.png",
+  "Rear Drawer Bottom Dim.png"
+]);
 
 const configuredOrigins = (process.env.CORS_ORIGINS || "")
   .split(",")
@@ -43,19 +73,310 @@ function isAllowedOrigin(origin) {
   return allowGithubPages && isGithubPagesOrigin(origin);
 }
 
-app.use(cors({
-  origin(origin, callback) {
-    if (isAllowedOrigin(origin)) {
-      callback(null, true);
-      return;
+function readCookies(req) {
+  const raw = req.headers.cookie || "";
+  const parsed = {};
+  for (const chunk of raw.split(";")) {
+    const [key, ...rest] = chunk.trim().split("=");
+    if (!key) {
+      continue;
     }
-    callback(new Error("Origin not allowed by CORS"));
+    parsed[key] = decodeURIComponent(rest.join("="));
   }
-}));
-app.use(express.json());
+  return parsed;
+}
 
-if (SERVE_STATIC) {
-  app.use(express.static(__dirname));
+function signHmac(value, secret) {
+  return crypto.createHmac("sha256", secret).update(value).digest("base64url");
+}
+
+function safeCompare(a, b) {
+  const left = Buffer.from(String(a));
+  const right = Buffer.from(String(b));
+  if (left.length !== right.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(left, right);
+}
+
+function serializeCookie(name, value, options = {}) {
+  const parts = [`${name}=${encodeURIComponent(value)}`];
+  parts.push(`Path=${options.path || "/"}`);
+  if (options.httpOnly !== false) {
+    parts.push("HttpOnly");
+  }
+  if (options.sameSite) {
+    parts.push(`SameSite=${options.sameSite}`);
+  }
+  if (options.secure) {
+    parts.push("Secure");
+  }
+  if (typeof options.maxAge === "number") {
+    parts.push(`Max-Age=${Math.max(0, Math.floor(options.maxAge))}`);
+  }
+  return parts.join("; ");
+}
+
+function getSessionSecret() {
+  const secret = process.env.SESSION_SECRET || "";
+  if (!secret) {
+    throw new Error("SESSION_SECRET is required.");
+  }
+  return secret;
+}
+
+function createSessionToken(payload, secret) {
+  const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const signature = signHmac(encoded, secret);
+  return `${encoded}.${signature}`;
+}
+
+function verifySessionToken(token, secret) {
+  if (!token || typeof token !== "string") {
+    return null;
+  }
+  const parts = token.split(".");
+  if (parts.length !== 2) {
+    return null;
+  }
+  const [encoded, signature] = parts;
+  const expected = signHmac(encoded, secret);
+  if (!safeCompare(signature, expected)) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+    if (!payload || !payload.userId || typeof payload.exp !== "number") {
+      return null;
+    }
+    if (Date.now() >= payload.exp) {
+      return null;
+    }
+    return payload;
+  } catch (_err) {
+    return null;
+  }
+}
+
+function identityTrusted(req) {
+  const timestamp = req.get("x-identity-timestamp") || "";
+  const signature = req.get("x-identity-signature") || "";
+  const sharedSecret = process.env.IDENTITY_SHARED_SECRET || "";
+  const enforce = process.env.NODE_ENV === "production" || Boolean(sharedSecret);
+
+  if (!enforce) {
+    return true;
+  }
+  if (!sharedSecret || !timestamp || !signature) {
+    return false;
+  }
+
+  const parsed = Number(timestamp);
+  if (!Number.isFinite(parsed)) {
+    return false;
+  }
+
+  const now = Date.now();
+  if (Math.abs(now - parsed) > 1000 * 60 * 5) {
+    return false;
+  }
+
+  const rawBody = typeof req.rawBody === "string" ? req.rawBody : "";
+  const expected = signHmac(`${timestamp}.${rawBody}`, sharedSecret);
+  const provided = signature.startsWith("sha256=") ? signature.slice(7) : signature;
+  return safeCompare(provided, expected);
+}
+
+function billingTrusted(req) {
+  const sharedSecret = process.env.BILLING_WEBHOOK_SECRET || "";
+  const enforce = process.env.NODE_ENV === "production" || Boolean(sharedSecret);
+  if (!enforce) {
+    return true;
+  }
+
+  const headerSecret = req.get("x-billing-secret") || "";
+  const authHeader = req.get("authorization") || "";
+  const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+  const provided = headerSecret || bearer;
+
+  if (!sharedSecret || !provided) {
+    return false;
+  }
+  return safeCompare(provided, sharedSecret);
+}
+
+function parseCsvEnv(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function paidPlanIds() {
+  return new Set(parseCsvEnv(process.env.WIX_PAID_PLAN_IDS));
+}
+
+function paidPlanNames() {
+  const configured = parseCsvEnv(process.env.WIX_PAID_PLAN_NAMES);
+  return new Set((configured.length ? configured : DEFAULT_PAID_PLAN_NAMES).map((name) => name.toLowerCase()));
+}
+
+function normalizeOrderStatus(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function normalizePaymentStatus(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function mapWixStatusToSubscriptionStatus(status) {
+  const normalized = normalizeOrderStatus(status);
+  if (normalized === "ACTIVE") {
+    return "active";
+  }
+  if (normalized === "PENDING") {
+    return "pending";
+  }
+  return "inactive";
+}
+
+function hasPaidWixAccess(orders = []) {
+  const ids = paidPlanIds();
+  const names = paidPlanNames();
+  const useIds = ids.size > 0;
+
+  return orders.some((order) => {
+    const status = normalizeOrderStatus(order.status);
+    const paymentStatus = normalizePaymentStatus(order.paymentStatus);
+    if (!PAID_ORDER_STATUSES.has(status) || paymentStatus !== "PAID") {
+      return false;
+    }
+    if (useIds) {
+      return ids.has(String(order.planId || "").trim());
+    }
+    return names.has(String(order.planName || "").trim().toLowerCase());
+  });
+}
+
+function canDenyFromWixOrders(orders = []) {
+  return orders.some((order) => DENIED_ORDER_STATUSES.has(normalizeOrderStatus(order.status)));
+}
+
+async function getWixOrdersForMember(memberId, fetchImpl = fetch) {
+  const wixApiToken = process.env.WIX_API_TOKEN || "";
+  if (!memberId || !wixApiToken) {
+    return null;
+  }
+
+  const url = new URL("https://www.wixapis.com/pricing-plans/v2/orders");
+  url.searchParams.append("buyerIds", memberId);
+  url.searchParams.append("orderStatuses", "ACTIVE");
+  url.searchParams.append("orderStatuses", "PENDING");
+
+  const response = await fetchImpl(url.toString(), {
+    method: "GET",
+    headers: {
+      Authorization: "Bearer " + wixApiToken,
+      "Content-Type": "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Wix orders request failed with ${response.status}.`);
+  }
+
+  const body = await response.json();
+  if (Array.isArray(body.orders)) {
+    return body.orders;
+  }
+  if (body && body.orders && Array.isArray(body.orders.results)) {
+    return body.orders.results;
+  }
+  if (body && body.data && Array.isArray(body.data.orders)) {
+    return body.data.orders;
+  }
+  return [];
+}
+
+async function evaluateSaveAccessForUser(user, userStore, fetchImpl = fetch) {
+  if (!user) {
+    return { allowed: false, reason: "unauthenticated" };
+  }
+
+  if (resolvePlanForUser(user) === "pro") {
+    return { allowed: true, reason: "stored-entitlement" };
+  }
+
+  const memberId = user.externalMemberId || "";
+  const wixOrders = await getWixOrdersForMember(memberId, fetchImpl);
+  if (!wixOrders) {
+    return { allowed: false, reason: "no-wix-member-or-token" };
+  }
+
+  const allowed = hasPaidWixAccess(wixOrders);
+  if (allowed) {
+    const matchingOrder = wixOrders.find((order) => {
+      const status = normalizeOrderStatus(order.status);
+      const paymentStatus = normalizePaymentStatus(order.paymentStatus);
+      return PAID_ORDER_STATUSES.has(status) && paymentStatus === "PAID";
+    }) || null;
+
+    const subscriptionStatus = mapWixStatusToSubscriptionStatus(matchingOrder ? matchingOrder.status : "ACTIVE");
+    const updatedUser = await userStore.updateUserBilling({
+      userId: user.id,
+      email: user.email,
+      externalMemberId: user.externalMemberId,
+      externalCustomerId: user.externalCustomerId,
+      plan: "pro",
+      subscriptionStatus
+    });
+    return {
+      allowed: true,
+      reason: "wix-order",
+      user: updatedUser || user
+    };
+  }
+
+  if (canDenyFromWixOrders(wixOrders)) {
+    await userStore.updateUserBilling({
+      userId: user.id,
+      email: user.email,
+      externalMemberId: user.externalMemberId,
+      externalCustomerId: user.externalCustomerId,
+      plan: "free",
+      subscriptionStatus: "inactive"
+    });
+  }
+
+  return { allowed: false, reason: "no-active-paid-order" };
+}
+
+function resolvePlanForUser(user) {
+  const plan = user && typeof user.plan === "string" ? user.plan.toLowerCase() : "free";
+  const subscriptionStatus = user && typeof user.subscriptionStatus === "string"
+    ? user.subscriptionStatus.toLowerCase()
+    : "inactive";
+
+  if (plan === "pro" && PRO_SUBSCRIPTION_STATUSES.has(subscriptionStatus)) {
+    return "pro";
+  }
+  return "free";
+}
+
+function userSummary(user) {
+  if (!user) {
+    return null;
+  }
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    plan: user.plan,
+    subscriptionStatus: user.subscriptionStatus,
+    externalCustomerId: user.externalCustomerId,
+    externalMemberId: user.externalMemberId
+  };
 }
 
 async function readStore() {
@@ -76,6 +397,17 @@ async function writeStore(store) {
   const normalized = normalizeStore(store);
   await fs.mkdir(path.dirname(DATA_FILE), { recursive: true });
   await fs.writeFile(DATA_FILE, JSON.stringify(normalized, null, 2), "utf8");
+}
+
+function mutateLegacyStore(mutator) {
+  const run = legacyStoreQueue.then(async () => {
+    const store = await readStore();
+    const result = await mutator(store);
+    await writeStore(store);
+    return result;
+  });
+  legacyStoreQueue = run.catch(() => {});
+  return run;
 }
 
 function defaultCatalog() {
@@ -246,7 +578,6 @@ function defaultSettings() {
 function defaultUserStore() {
   const defaults = defaultCatalog();
   return {
-    projects: [],
     doorStyles: defaults.doorStyles,
     overlayTemplates: defaults.overlayTemplates,
     drawerSlides: defaults.drawerSlides,
@@ -259,7 +590,6 @@ function normalizeUserStore(store) {
   const source = store && typeof store === "object" ? store : {};
   const defaults = defaultCatalog();
   return {
-    projects: Array.isArray(source.projects) ? source.projects : [],
     doorStyles: Array.isArray(source.doorStyles) && source.doorStyles.length ? source.doorStyles : defaults.doorStyles,
     overlayTemplates: Array.isArray(source.overlayTemplates) && source.overlayTemplates.length ? source.overlayTemplates : defaults.overlayTemplates,
     drawerSlides: Array.isArray(source.drawerSlides) && source.drawerSlides.length ? source.drawerSlides : defaults.drawerSlides,
@@ -281,19 +611,6 @@ function normalizeStore(store) {
     }
   }
 
-  const hasLegacyRoot = Boolean(
-    Array.isArray(source.projects)
-    || Array.isArray(source.doorStyles)
-    || Array.isArray(source.overlayTemplates)
-    || Array.isArray(source.drawerSlides)
-    || Array.isArray(source.drawerConstructions)
-    || source.settings
-  );
-
-  if (hasLegacyRoot && !users[PUBLIC_USER_ID]) {
-    users[PUBLIC_USER_ID] = normalizeUserStore(source);
-  }
-
   if (!Object.keys(users).length) {
     users[PUBLIC_USER_ID] = defaultUserStore();
   }
@@ -301,24 +618,11 @@ function normalizeStore(store) {
   return { users };
 }
 
-function newId() {
-  return Math.random().toString(36).slice(2, 10);
-}
-
-function normalizeUserId(value) {
-  if (!value) {
-    return PUBLIC_USER_ID;
+function catalogScopeUserId(req) {
+  if (req.currentUser && req.currentUser.id) {
+    return `auth:${req.currentUser.id}`;
   }
-  const safe = String(value).trim();
-  if (!USER_ID_REGEX.test(safe)) {
-    return PUBLIC_USER_ID;
-  }
-  return safe;
-}
-
-function requestUserId(req) {
-  const raw = req.get("x-user-id") || "";
-  return normalizeUserId(raw);
+  return PUBLIC_USER_ID;
 }
 
 function getUserStore(store, userId) {
@@ -328,175 +632,458 @@ function getUserStore(store, userId) {
   return store.users[userId];
 }
 
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, timestamp: new Date().toISOString() });
-});
+function attachRawBody(req, _res, buffer) {
+  req.rawBody = buffer.toString("utf8");
+}
 
-app.get("/api/store", async (req, res) => {
-  try {
-    const store = await readStore();
-    const userStore = getUserStore(store, requestUserId(req));
-    res.json(userStore);
-  } catch (err) {
-    res.status(500).json({ error: "Could not load data store." });
-  }
-});
+function createApp(options = {}) {
+  const app = express();
+  const sessionSecret = getSessionSecret();
+  const wixFetch = options.wixFetch || fetch;
+  const requestRateLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 600,
+    standardHeaders: true,
+    legacyHeaders: false
+  });
+  const authRateLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 60,
+    standardHeaders: true,
+    legacyHeaders: false
+  });
+  const userStore = options.userStore || createUserStore({});
+  const userStoreReady = Promise.resolve(userStore.init());
 
-app.get("/api/projects", async (req, res) => {
-  try {
-    const store = await readStore();
-    const userStore = getUserStore(store, requestUserId(req));
-    res.json(userStore.projects || []);
-  } catch (err) {
-    res.status(500).json({ error: "Could not load projects." });
-  }
-});
-
-app.post("/api/projects", async (req, res) => {
-  try {
-    const { name, payload } = req.body || {};
-    if (!name || typeof name !== "string") {
-      return res.status(400).json({ error: "Project name is required." });
+  app.use(cors({
+    credentials: true,
+    origin(origin, callback) {
+      if (isAllowedOrigin(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error("Origin not allowed by CORS"));
     }
+  }));
+  app.use(express.json({ verify: attachRawBody }));
 
-    const store = await readStore();
-    const userStore = getUserStore(store, requestUserId(req));
-    const now = new Date().toISOString();
-    const project = {
-      id: newId(),
-      name: name.trim(),
-      payload: payload || {},
-      createdAt: now,
-      updatedAt: now
-    };
-
-    userStore.projects.push(project);
-    await writeStore(store);
-    res.status(201).json(project);
-  } catch (err) {
-    res.status(500).json({ error: "Could not save project." });
-  }
-});
-
-app.put("/api/projects/:id", async (req, res) => {
-  try {
-    const store = await readStore();
-    const userStore = getUserStore(store, requestUserId(req));
-    const idx = (userStore.projects || []).findIndex((p) => p.id === req.params.id);
-
-    if (idx < 0) {
-      return res.status(404).json({ error: "Project not found." });
-    }
-
-    const existing = userStore.projects[idx];
-    const { name, payload } = req.body || {};
-
-    const updated = {
-      ...existing,
-      name: typeof name === "string" ? name.trim() : existing.name,
-      payload: payload !== undefined ? payload : existing.payload,
-      updatedAt: new Date().toISOString()
-    };
-
-    userStore.projects[idx] = updated;
-    await writeStore(store);
-    res.json(updated);
-  } catch (err) {
-    res.status(500).json({ error: "Could not update project." });
-  }
-});
-
-app.delete("/api/projects/:id", async (req, res) => {
-  try {
-    const store = await readStore();
-    const userStore = getUserStore(store, requestUserId(req));
-    const before = userStore.projects.length;
-    userStore.projects = userStore.projects.filter((p) => p.id !== req.params.id);
-
-    if (userStore.projects.length === before) {
-      return res.status(404).json({ error: "Project not found." });
-    }
-
-    await writeStore(store);
-    res.status(204).send();
-  } catch (err) {
-    res.status(500).json({ error: "Could not delete project." });
-  }
-});
-
-app.put("/api/settings", async (req, res) => {
-  try {
-    const store = await readStore();
-    const userStore = getUserStore(store, requestUserId(req));
-    const body = req.body || {};
-    userStore.settings = {
-      ...userStore.settings,
-      unitSystem: body.unitSystem === "metric" ? "metric" : "in",
-      precision: typeof body.precision === "string" ? body.precision : userStore.settings.precision
-    };
-    await writeStore(store);
-    res.json(userStore.settings);
-  } catch (err) {
-    res.status(500).json({ error: "Could not update settings." });
-  }
-});
-
-function listHandlers({ listKey, pathBase }) {
-  app.post(`/api/${pathBase}`, async (req, res) => {
+  app.use(requestRateLimiter, async (req, _res, next) => {
     try {
-      const store = await readStore();
-      const userStore = getUserStore(store, requestUserId(req));
-      const item = { id: newId(), ...(req.body || {}) };
-      userStore[listKey].push(item);
-      await writeStore(store);
-      res.status(201).json(item);
+      await userStoreReady;
+      req.currentUser = null;
+      const cookies = readCookies(req);
+      const token = cookies[SESSION_COOKIE_NAME];
+      const session = verifySessionToken(token, sessionSecret);
+      if (session && session.userId) {
+        req.currentUser = await userStore.getUserById(session.userId);
+      }
+      next();
     } catch (err) {
-      res.status(500).json({ error: `Could not save ${pathBase}.` });
+      next(err);
     }
   });
 
-  app.put(`/api/${pathBase}/:id`, async (req, res) => {
-    try {
-      const store = await readStore();
-      const userStore = getUserStore(store, requestUserId(req));
-      const idx = userStore[listKey].findIndex((item) => item.id === req.params.id);
+  if (SERVE_STATIC) {
+    app.get("/", requestRateLimiter, (_req, res) => {
+      res.sendFile(path.join(__dirname, "index.html"));
+    });
+    app.get("/:asset", requestRateLimiter, (req, res, next) => {
+      const asset = req.params.asset;
+      if (!STATIC_FILES.has(asset)) {
+        next();
+        return;
+      }
+      res.sendFile(path.join(__dirname, asset));
+    });
+  }
 
-      if (idx < 0) {
-        return res.status(404).json({ error: "Item not found." });
+  function requireAuth(req, res, next) {
+    if (!req.currentUser) {
+      res.status(401).json({ error: "Authentication required." });
+      return;
+    }
+    next();
+  }
+
+  async function requireSubscriber(req, res, next) {
+    try {
+      const check = await evaluateSaveAccessForUser(req.currentUser, userStore, wixFetch);
+      if (!check.allowed) {
+        res.status(403).json({
+          error: "Active paid subscription required.",
+          reason: check.reason
+        });
+        return;
+      }
+      if (check.user) {
+        req.currentUser = check.user;
+      }
+      next();
+    } catch (_err) {
+      res.status(503).json({ error: "Could not verify subscription access." });
+    }
+  }
+
+  app.get("/api/health", (_req, res) => {
+    res.json({ ok: true, timestamp: new Date().toISOString() });
+  });
+
+  app.get("/api/assets/:name", requestRateLimiter, (req, res) => {
+    const name = String(req.params.name || "");
+    if (!STATIC_FILES.has(name)) {
+      res.status(404).json({ error: "Asset not found." });
+      return;
+    }
+    res.sendFile(path.join(__dirname, name), (err) => {
+      if (!err || res.headersSent) {
+        return;
+      }
+      if (err.code === "ENOENT") {
+        res.status(404).json({ error: "Asset not found." });
+        return;
+      }
+      res.status(500).json({ error: "Could not load asset." });
+    });
+  });
+
+  app.get("/api/config", (req, res) => {
+    const plan = resolvePlanForUser(req.currentUser);
+    res.json({
+      plan,
+      upgradeUrl: process.env.WIX_UPGRADE_URL || ""
+    });
+  });
+
+  app.get("/api/auth/session", (req, res) => {
+    const user = req.currentUser;
+    res.json({
+      authenticated: Boolean(user),
+      user: userSummary(user),
+      plan: resolvePlanForUser(user)
+    });
+  });
+
+  app.post("/api/auth/sso", authRateLimiter, async (req, res) => {
+    try {
+      await userStoreReady;
+      if (!identityTrusted(req)) {
+        res.status(401).json({ error: "Untrusted identity request." });
+        return;
       }
 
-      userStore[listKey][idx] = { ...userStore[listKey][idx], ...(req.body || {}) };
-      await writeStore(store);
-      res.json(userStore[listKey][idx]);
+      const identity = req.body && typeof req.body === "object" ? req.body : {};
+      if (!identity.email || typeof identity.email !== "string") {
+        res.status(400).json({ error: "Email is required." });
+        return;
+      }
+
+      const user = await userStore.upsertUserFromIdentity(identity);
+      const token = createSessionToken(
+        { userId: user.id, exp: Date.now() + SESSION_TTL_MS },
+        sessionSecret
+      );
+      res.setHeader("Set-Cookie", serializeCookie(SESSION_COOKIE_NAME, token, {
+        path: "/",
+        httpOnly: true,
+        sameSite: "Lax",
+        secure: process.env.NODE_ENV === "production",
+        maxAge: Math.floor(SESSION_TTL_MS / 1000)
+      }));
+
+      res.json({
+        authenticated: true,
+        user: userSummary(user),
+        plan: resolvePlanForUser(user)
+      });
     } catch (err) {
-      res.status(500).json({ error: `Could not update ${pathBase}.` });
+      if (err && /Conflicting identity match/i.test(err.message)) {
+        res.status(409).json({ error: "Conflicting identity payload." });
+        return;
+      }
+      res.status(500).json({ error: "Could not complete sign in." });
     }
   });
 
-  app.delete(`/api/${pathBase}/:id`, async (req, res) => {
-    try {
-      const store = await readStore();
-      const userStore = getUserStore(store, requestUserId(req));
-      const before = userStore[listKey].length;
-      userStore[listKey] = userStore[listKey].filter((item) => item.id !== req.params.id);
+  app.post("/api/auth/logout", (_req, res) => {
+    res.setHeader("Set-Cookie", serializeCookie(SESSION_COOKIE_NAME, "", {
+      path: "/",
+      httpOnly: true,
+      sameSite: "Lax",
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 0
+    }));
+    res.json({ ok: true });
+  });
 
-      if (userStore[listKey].length === before) {
-        return res.status(404).json({ error: "Item not found." });
+  app.post("/api/billing/webhook", async (req, res) => {
+    try {
+      await userStoreReady;
+      if (!billingTrusted(req)) {
+        res.status(401).json({ error: "Untrusted billing webhook." });
+        return;
       }
 
-      await writeStore(store);
+      const update = req.body && typeof req.body === "object" ? req.body : {};
+      const updatedUser = await userStore.updateUserBilling(update);
+      if (!updatedUser) {
+        res.status(404).json({ error: "User not found for billing update." });
+        return;
+      }
+
+      res.json({
+        ok: true,
+        user: userSummary(updatedUser),
+        plan: resolvePlanForUser(updatedUser)
+      });
+    } catch (err) {
+      if (err && /Conflicting identity match/i.test(err.message)) {
+        res.status(409).json({ error: "Conflicting billing identity." });
+        return;
+      }
+      res.status(500).json({ error: "Could not process billing webhook." });
+    }
+  });
+
+  app.post("/api/can-save", requireAuth, async (req, res) => {
+    try {
+      await userStoreReady;
+      const check = await evaluateSaveAccessForUser(req.currentUser, userStore, wixFetch);
+      if (check.user) {
+        req.currentUser = check.user;
+      }
+      res.json({
+        allowed: check.allowed,
+        reason: check.reason,
+        retentionMonths: RETENTION_MONTHS
+      });
+    } catch (_err) {
+      res.status(503).json({ allowed: false, error: "Could not verify subscription access." });
+    }
+  });
+
+  app.get("/api/store", async (req, res) => {
+    try {
+      await userStoreReady;
+      const store = await readStore();
+      const catalogStore = getUserStore(store, catalogScopeUserId(req));
+      const projects = req.currentUser ? await userStore.listProjectsByUser(req.currentUser.id) : [];
+      res.json({ ...catalogStore, projects });
+    } catch (_err) {
+      res.status(500).json({ error: "Could not load data store." });
+    }
+  });
+
+  app.get("/api/projects", requireAuth, async (req, res) => {
+    try {
+      await userStoreReady;
+      const projects = await userStore.listProjectsByUser(req.currentUser.id);
+      res.json(projects);
+    } catch (_err) {
+      res.status(500).json({ error: "Could not load projects." });
+    }
+  });
+
+  app.post("/api/projects", requireAuth, requireSubscriber, async (req, res) => {
+    try {
+      await userStoreReady;
+      const project = await userStore.createProject(req.currentUser.id, req.body || {});
+      res.status(201).json(project);
+    } catch (err) {
+      if (err && /Project name is required/i.test(err.message)) {
+        res.status(400).json({ error: "Project name is required." });
+        return;
+      }
+      res.status(500).json({ error: "Could not save project." });
+    }
+  });
+
+  app.put("/api/projects/:id", requireAuth, requireSubscriber, async (req, res) => {
+    try {
+      await userStoreReady;
+      const project = await userStore.updateProject(req.currentUser.id, req.params.id, req.body || {});
+      if (!project) {
+        res.status(404).json({ error: "Project not found." });
+        return;
+      }
+      res.json(project);
+    } catch (_err) {
+      res.status(500).json({ error: "Could not update project." });
+    }
+  });
+
+  app.delete("/api/projects/:id", requireAuth, requireSubscriber, async (req, res) => {
+    try {
+      await userStoreReady;
+      const deleted = await userStore.deleteProject(req.currentUser.id, req.params.id);
+      if (!deleted) {
+        res.status(404).json({ error: "Project not found." });
+        return;
+      }
       res.status(204).send();
-    } catch (err) {
-      res.status(500).json({ error: `Could not delete ${pathBase}.` });
+    } catch (_err) {
+      res.status(500).json({ error: "Could not delete project." });
     }
+  });
+
+  app.get("/api/presets", requireAuth, async (req, res) => {
+    try {
+      await userStoreReady;
+      const presets = await userStore.listPresetsByUser(req.currentUser.id);
+      res.json(presets);
+    } catch (_err) {
+      res.status(500).json({ error: "Could not load presets." });
+    }
+  });
+
+  app.post("/api/presets", requireAuth, requireSubscriber, async (req, res) => {
+    try {
+      await userStoreReady;
+      const preset = await userStore.createPreset(req.currentUser.id, req.body || {});
+      res.status(201).json(preset);
+    } catch (err) {
+      if (err && /Preset type and name are required/i.test(err.message)) {
+        res.status(400).json({ error: "Preset type and name are required." });
+        return;
+      }
+      res.status(500).json({ error: "Could not save preset." });
+    }
+  });
+
+  app.put("/api/presets/:id", requireAuth, requireSubscriber, async (req, res) => {
+    try {
+      await userStoreReady;
+      const preset = await userStore.updatePreset(req.currentUser.id, req.params.id, req.body || {});
+      if (!preset) {
+        res.status(404).json({ error: "Preset not found." });
+        return;
+      }
+      res.json(preset);
+    } catch (_err) {
+      res.status(500).json({ error: "Could not update preset." });
+    }
+  });
+
+  app.delete("/api/presets/:id", requireAuth, requireSubscriber, async (req, res) => {
+    try {
+      await userStoreReady;
+      const deleted = await userStore.deletePreset(req.currentUser.id, req.params.id);
+      if (!deleted) {
+        res.status(404).json({ error: "Preset not found." });
+        return;
+      }
+      res.status(204).send();
+    } catch (_err) {
+      res.status(500).json({ error: "Could not delete preset." });
+    }
+  });
+
+  app.put("/api/settings", requireAuth, requireSubscriber, async (req, res) => {
+    try {
+      const body = req.body || {};
+      const settings = await mutateLegacyStore(async (store) => {
+        const userStoreRecord = getUserStore(store, catalogScopeUserId(req));
+        userStoreRecord.settings = {
+          ...userStoreRecord.settings,
+          unitSystem: body.unitSystem === "metric" ? "metric" : "in",
+          precision: typeof body.precision === "string" ? body.precision : userStoreRecord.settings.precision
+        };
+        return userStoreRecord.settings;
+      });
+      res.json(settings);
+    } catch (_err) {
+      res.status(500).json({ error: "Could not update settings." });
+    }
+  });
+
+  function listHandlers({ listKey, pathBase }) {
+    app.post(`/api/${pathBase}`, requireAuth, requireSubscriber, async (req, res) => {
+      try {
+        const item = await mutateLegacyStore(async (store) => {
+          const userStoreRecord = getUserStore(store, catalogScopeUserId(req));
+          const nextItem = { id: crypto.randomUUID(), ...(req.body || {}) };
+          userStoreRecord[listKey].push(nextItem);
+          return nextItem;
+        });
+        res.status(201).json(item);
+      } catch (_err) {
+        res.status(500).json({ error: `Could not save ${pathBase}.` });
+      }
+    });
+
+    app.put(`/api/${pathBase}/:id`, requireAuth, requireSubscriber, async (req, res) => {
+      try {
+        const updated = await mutateLegacyStore(async (store) => {
+          const userStoreRecord = getUserStore(store, catalogScopeUserId(req));
+          const idx = userStoreRecord[listKey].findIndex((item) => item.id === req.params.id);
+          if (idx < 0) {
+            return null;
+          }
+          userStoreRecord[listKey][idx] = { ...userStoreRecord[listKey][idx], ...(req.body || {}) };
+          return userStoreRecord[listKey][idx];
+        });
+
+        if (!updated) {
+          return res.status(404).json({ error: "Item not found." });
+        }
+
+        res.json(updated);
+      } catch (_err) {
+        res.status(500).json({ error: `Could not update ${pathBase}.` });
+      }
+    });
+
+    app.delete(`/api/${pathBase}/:id`, requireAuth, requireSubscriber, async (req, res) => {
+      try {
+        const deleted = await mutateLegacyStore(async (store) => {
+          const userStoreRecord = getUserStore(store, catalogScopeUserId(req));
+          const before = userStoreRecord[listKey].length;
+          userStoreRecord[listKey] = userStoreRecord[listKey].filter((item) => item.id !== req.params.id);
+          return userStoreRecord[listKey].length !== before;
+        });
+
+        if (!deleted) {
+          return res.status(404).json({ error: "Item not found." });
+        }
+
+        res.status(204).send();
+      } catch (_err) {
+        res.status(500).json({ error: `Could not delete ${pathBase}.` });
+      }
+    });
+  }
+
+  listHandlers({ listKey: "doorStyles", pathBase: "door-styles" });
+  listHandlers({ listKey: "overlayTemplates", pathBase: "overlay-templates" });
+  listHandlers({ listKey: "drawerSlides", pathBase: "drawer-slides" });
+  listHandlers({ listKey: "drawerConstructions", pathBase: "drawer-constructions" });
+
+  app.locals.userStore = userStore;
+  app.locals.userStoreReady = userStoreReady;
+  return app;
+}
+
+async function startServer(options = {}) {
+  const app = createApp(options);
+  await app.locals.userStoreReady;
+  const listenPort = options.port ?? PORT;
+  return new Promise((resolve) => {
+    const server = app.listen(listenPort, () => {
+      console.log(`Door and Drawer Cutlister API running on port ${listenPort}`);
+      resolve({ app, server });
+    });
   });
 }
 
-listHandlers({ listKey: "doorStyles", pathBase: "door-styles" });
-listHandlers({ listKey: "overlayTemplates", pathBase: "overlay-templates" });
-listHandlers({ listKey: "drawerSlides", pathBase: "drawer-slides" });
-listHandlers({ listKey: "drawerConstructions", pathBase: "drawer-constructions" });
+if (require.main === module) {
+  startServer().catch((err) => {
+    console.error("Failed to start server", err);
+    process.exit(1);
+  });
+}
 
-app.listen(PORT, () => {
-  console.log(`Door and Drawer Cutlister API running on port ${PORT}`);
-});
+module.exports = {
+  createApp,
+  startServer,
+  resolvePlanForUser,
+  SESSION_COOKIE_NAME
+};

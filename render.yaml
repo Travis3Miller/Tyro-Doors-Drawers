@@ -1,3 +1,9 @@
+databases:
+  - name: doors-drawers-db
+    plan: starter
+    databaseName: tyro_doors_drawers
+    user: tyro_doors_drawers
+
 services:
   - type: web
     name: doors-drawers-cutlister-api
@@ -6,6 +12,7 @@ services:
     autoDeploy: true
     buildCommand: npm install
     startCommand: npm start
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION
         value: 20
@@ -13,6 +20,26 @@ services:
         value: "false"
       - key: ALLOW_GITHUB_PAGES
         value: "true"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: doors-drawers-db
+          property: connectionString
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: IDENTITY_SHARED_SECRET
+        sync: false
+      - key: BILLING_WEBHOOK_SECRET
+        sync: false
+      - key: WIX_API_TOKEN
+        sync: false
+      - key: WIX_PAID_PLAN_IDS
+        sync: false
+      - key: WIX_PAID_PLAN_NAMES
+        value: Doors and Drawers Cutlister
+      - key: DATA_RETENTION_MONTHS
+        value: "13"
+      - key: WIX_UPGRADE_URL
+        sync: false
       # Set this in Render dashboard to your real GitHub Pages URL.
       # - key: CORS_ORIGINS
       #   value: https://yourname.github.io
