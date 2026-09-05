@@ -127,6 +127,12 @@ h1 {
   color: var(--accent-dark);
 }
 
+.welcome-banner {
+  margin: 0 0 8px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
 .card {
   background: var(--card);
   border: 1px solid var(--line);

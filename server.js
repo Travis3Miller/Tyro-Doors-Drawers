@@ -728,6 +728,24 @@ function createApp(options = {}) {
     res.json({ ok: true, timestamp: new Date().toISOString() });
   });
 
+  app.get("/api/assets/:name", requestRateLimiter, (req, res) => {
+    const name = String(req.params.name || "");
+    if (!STATIC_FILES.has(name)) {
+      res.status(404).json({ error: "Asset not found." });
+      return;
+    }
+    res.sendFile(path.join(__dirname, name), (err) => {
+      if (!err || res.headersSent) {
+        return;
+      }
+      if (err.code === "ENOENT") {
+        res.status(404).json({ error: "Asset not found." });
+        return;
+      }
+      res.status(500).json({ error: "Could not load asset." });
+    });
+  });
+
   app.get("/api/config", (req, res) => {
     const plan = resolvePlanForUser(req.currentUser);
     res.json({

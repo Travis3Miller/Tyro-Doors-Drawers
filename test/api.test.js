@@ -96,6 +96,12 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   const healthBody = await healthRes.json();
   assert.equal(healthBody.ok, true);
 
+  const assetRes = await jsonRequest(baseUrl, "/api/assets/ButtJoint%20Drawer.jpg");
+  assert.equal(assetRes.status, 200);
+
+  const missingAssetRes = await jsonRequest(baseUrl, "/api/assets/not-a-real-file.png");
+  assert.equal(missingAssetRes.status, 404);
+
   const configRes = await jsonRequest(baseUrl, "/api/config");
   assert.equal(configRes.status, 200);
   const configBody = await configRes.json();
