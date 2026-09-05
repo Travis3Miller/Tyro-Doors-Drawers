@@ -19,7 +19,6 @@ const DENIED_ORDER_STATUSES = new Set(["CANCELED", "ENDED", "PAUSED", "REFUNDED"
 const DEFAULT_PAID_PLAN_NAMES = ["Doors and Drawers Cutlister", "Job Cost Estimation"];
 const RETENTION_MONTHS = Number(process.env.DATA_RETENTION_MONTHS || 13);
 let legacyStoreQueue = Promise.resolve();
-let generatedSessionSecret = "";
 const STATIC_FILES = new Set([
   "index.html",
   "script.js",
@@ -121,13 +120,12 @@ function serializeCookie(name, value, options = {}) {
 function getSessionSecret() {
   const secret = process.env.SESSION_SECRET || "";
   if (secret) {
-    return secret;
+    return { secret, ephemeral: false };
   }
-  if (!generatedSessionSecret) {
-    generatedSessionSecret = crypto.randomBytes(32).toString("hex");
-    console.warn("SESSION_SECRET is not set. Using an ephemeral in-memory secret; sessions will be reset on restart.");
-  }
-  return generatedSessionSecret;
+  return {
+    secret: crypto.randomBytes(32).toString("hex"),
+    ephemeral: true
+  };
 }
 
 function createSessionToken(payload, secret) {
@@ -643,7 +641,10 @@ function attachRawBody(req, _res, buffer) {
 
 function createApp(options = {}) {
   const app = express();
-  const sessionSecret = getSessionSecret();
+  const { secret: sessionSecret, ephemeral: ephemeralSessionSecret } = getSessionSecret();
+  if (ephemeralSessionSecret) {
+    console.warn("SESSION_SECRET is not set. Using an ephemeral in-memory secret; sessions will be reset on restart.");
+  }
   const wixFetch = options.wixFetch || fetch;
   const requestRateLimiter = rateLimit({
     windowMs: 60 * 1000,
