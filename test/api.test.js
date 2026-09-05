@@ -10,7 +10,9 @@ const originalEnv = {
   SESSION_SECRET: process.env.SESSION_SECRET,
   IDENTITY_SHARED_SECRET: process.env.IDENTITY_SHARED_SECRET,
   BILLING_WEBHOOK_SECRET: process.env.BILLING_WEBHOOK_SECRET,
-  WIX_API_TOKEN: process.env.WIX_API_TOKEN,
+  WIX_CLIENT_ID: process.env.WIX_CLIENT_ID,
+  WIX_CLIENT_SECRET: process.env.WIX_CLIENT_SECRET,
+  WIX_OAUTH_REDIRECT_URI: process.env.WIX_OAUTH_REDIRECT_URI,
   WIX_PAID_PLAN_IDS: process.env.WIX_PAID_PLAN_IDS,
   USER_STORE_FILE: process.env.USER_STORE_FILE,
   LEGACY_STORE_FILE: process.env.LEGACY_STORE_FILE,
@@ -41,13 +43,37 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   process.env.SESSION_SECRET = "test-session-secret";
   process.env.IDENTITY_SHARED_SECRET = "identity-secret";
   process.env.BILLING_WEBHOOK_SECRET = "billing-secret";
-  process.env.WIX_API_TOKEN = "wix-token";
+  process.env.WIX_CLIENT_ID = "wix-client-id";
+  process.env.WIX_CLIENT_SECRET = "wix-client-secret";
   process.env.WIX_PAID_PLAN_IDS = "plan-doors";
   process.env.USER_STORE_FILE = userStoreFile;
   process.env.LEGACY_STORE_FILE = legacyStoreFile;
   process.env.WIX_UPGRADE_URL = "https://example.com/upgrade";
 
   const wixFetch = async (url) => {
+    if (url === "https://www.wixapis.com/oauth2/token") {
+      return new Response(JSON.stringify({
+        access_token: "site-access-token",
+        expires_in: 300
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (url === "https://www.wix.com/oauth/access") {
+      return new Response(JSON.stringify({
+        access_token: "member-access-token",
+        expires_in: 300
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (url === "https://www.wixapis.com/members/v1/members/me") {
+      return new Response(JSON.stringify({
+        member: {
+          id: "member-oauth",
+          loginEmail: "oauth-user@example.com",
+          profile: {
+            nickname: "OAuth User"
+          }
+        }
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
     const parsed = new URL(url);
     const buyerId = parsed.searchParams.get("buyerIds");
     if (buyerId === "member-a") {
@@ -87,7 +113,9 @@ test("health/config, auth session, project isolation, and billing entitlement", 
     if (originalEnv.SESSION_SECRET === undefined) delete process.env.SESSION_SECRET; else process.env.SESSION_SECRET = originalEnv.SESSION_SECRET;
     if (originalEnv.IDENTITY_SHARED_SECRET === undefined) delete process.env.IDENTITY_SHARED_SECRET; else process.env.IDENTITY_SHARED_SECRET = originalEnv.IDENTITY_SHARED_SECRET;
     if (originalEnv.BILLING_WEBHOOK_SECRET === undefined) delete process.env.BILLING_WEBHOOK_SECRET; else process.env.BILLING_WEBHOOK_SECRET = originalEnv.BILLING_WEBHOOK_SECRET;
-    if (originalEnv.WIX_API_TOKEN === undefined) delete process.env.WIX_API_TOKEN; else process.env.WIX_API_TOKEN = originalEnv.WIX_API_TOKEN;
+    if (originalEnv.WIX_CLIENT_ID === undefined) delete process.env.WIX_CLIENT_ID; else process.env.WIX_CLIENT_ID = originalEnv.WIX_CLIENT_ID;
+    if (originalEnv.WIX_CLIENT_SECRET === undefined) delete process.env.WIX_CLIENT_SECRET; else process.env.WIX_CLIENT_SECRET = originalEnv.WIX_CLIENT_SECRET;
+    if (originalEnv.WIX_OAUTH_REDIRECT_URI === undefined) delete process.env.WIX_OAUTH_REDIRECT_URI; else process.env.WIX_OAUTH_REDIRECT_URI = originalEnv.WIX_OAUTH_REDIRECT_URI;
     if (originalEnv.WIX_PAID_PLAN_IDS === undefined) delete process.env.WIX_PAID_PLAN_IDS; else process.env.WIX_PAID_PLAN_IDS = originalEnv.WIX_PAID_PLAN_IDS;
     if (originalEnv.USER_STORE_FILE === undefined) delete process.env.USER_STORE_FILE; else process.env.USER_STORE_FILE = originalEnv.USER_STORE_FILE;
     if (originalEnv.LEGACY_STORE_FILE === undefined) delete process.env.LEGACY_STORE_FILE; else process.env.LEGACY_STORE_FILE = originalEnv.LEGACY_STORE_FILE;
@@ -114,6 +142,23 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   const configBody = await configRes.json();
   assert.equal(configBody.plan, "free");
   assert.equal(configBody.upgradeUrl, "https://example.com/upgrade");
+
+  process.env.WIX_OAUTH_REDIRECT_URI = `${baseUrl}/api/auth/wix/callback`;
+  const wixLoginRes = await jsonRequest(baseUrl, "/api/auth/wix/login", {
+    redirect: "manual"
+  });
+  assert.equal(wixLoginRes.status, 302);
+  const oauthLocation = wixLoginRes.headers.get("location");
+  assert.ok(oauthLocation && oauthLocation.startsWith("https://www.wix.com/oauth/authorize?"));
+  const oauthState = new URL(oauthLocation).searchParams.get("state");
+  assert.ok(oauthState);
+
+  const wixCallbackRes = await jsonRequest(baseUrl, `/api/auth/wix/callback?code=test-code&state=${encodeURIComponent(oauthState)}`);
+  assert.equal(wixCallbackRes.status, 200);
+  const wixCallbackBody = await wixCallbackRes.json();
+  assert.equal(wixCallbackBody.authenticated, true);
+  assert.equal(wixCallbackBody.user.externalMemberId, "member-oauth");
+  assert.equal(wixCallbackBody.user.email, "oauth-user@example.com");
 
   const userAIdentity = JSON.stringify({
     email: "user-a@example.com",
@@ -324,7 +369,8 @@ test("server boots without SESSION_SECRET and keeps sessions valid across restar
   delete process.env.SESSION_SECRET;
   process.env.IDENTITY_SHARED_SECRET = "identity-secret";
   process.env.BILLING_WEBHOOK_SECRET = "billing-secret";
-  process.env.WIX_API_TOKEN = "";
+  process.env.WIX_CLIENT_ID = "";
+  process.env.WIX_CLIENT_SECRET = "";
   process.env.WIX_PAID_PLAN_IDS = "plan-doors";
   process.env.USER_STORE_FILE = userStoreFile;
   process.env.LEGACY_STORE_FILE = legacyStoreFile;
@@ -350,7 +396,9 @@ test("server boots without SESSION_SECRET and keeps sessions valid across restar
     if (originalEnv.SESSION_SECRET === undefined) delete process.env.SESSION_SECRET; else process.env.SESSION_SECRET = originalEnv.SESSION_SECRET;
     if (originalEnv.IDENTITY_SHARED_SECRET === undefined) delete process.env.IDENTITY_SHARED_SECRET; else process.env.IDENTITY_SHARED_SECRET = originalEnv.IDENTITY_SHARED_SECRET;
     if (originalEnv.BILLING_WEBHOOK_SECRET === undefined) delete process.env.BILLING_WEBHOOK_SECRET; else process.env.BILLING_WEBHOOK_SECRET = originalEnv.BILLING_WEBHOOK_SECRET;
-    if (originalEnv.WIX_API_TOKEN === undefined) delete process.env.WIX_API_TOKEN; else process.env.WIX_API_TOKEN = originalEnv.WIX_API_TOKEN;
+    if (originalEnv.WIX_CLIENT_ID === undefined) delete process.env.WIX_CLIENT_ID; else process.env.WIX_CLIENT_ID = originalEnv.WIX_CLIENT_ID;
+    if (originalEnv.WIX_CLIENT_SECRET === undefined) delete process.env.WIX_CLIENT_SECRET; else process.env.WIX_CLIENT_SECRET = originalEnv.WIX_CLIENT_SECRET;
+    if (originalEnv.WIX_OAUTH_REDIRECT_URI === undefined) delete process.env.WIX_OAUTH_REDIRECT_URI; else process.env.WIX_OAUTH_REDIRECT_URI = originalEnv.WIX_OAUTH_REDIRECT_URI;
     if (originalEnv.WIX_PAID_PLAN_IDS === undefined) delete process.env.WIX_PAID_PLAN_IDS; else process.env.WIX_PAID_PLAN_IDS = originalEnv.WIX_PAID_PLAN_IDS;
     if (originalEnv.USER_STORE_FILE === undefined) delete process.env.USER_STORE_FILE; else process.env.USER_STORE_FILE = originalEnv.USER_STORE_FILE;
     if (originalEnv.LEGACY_STORE_FILE === undefined) delete process.env.LEGACY_STORE_FILE; else process.env.LEGACY_STORE_FILE = originalEnv.LEGACY_STORE_FILE;

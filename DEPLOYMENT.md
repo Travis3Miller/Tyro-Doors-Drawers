@@ -14,10 +14,12 @@ This project is configured for:
 4. In the web service environment, set:
    - `IDENTITY_SHARED_SECRET`
    - `BILLING_WEBHOOK_SECRET`
-   - `WIX_API_TOKEN`
+   - `WIX_CLIENT_ID`
+   - `WIX_CLIENT_SECRET`
    - `WIX_PAID_PLAN_IDS` (recommended)
    - `WIX_UPGRADE_URL`
-   - optional `WIX_PAID_PLAN_NAMES` fallback
+   - optional `WIX_OAUTH_REDIRECT_URI` (defaults to `<api-origin>/api/auth/wix/callback`)
+   - optional `WIX_OAUTH_SCOPE`
    - optional `DATA_RETENTION_MONTHS` (default 13)
 5. `SESSION_SECRET` is generated automatically when you deploy from `render.yaml`; if it is missing, the server derives a stable fallback from another configured backend secret so the app can still boot, but you should still set `SESSION_SECRET` explicitly for a dedicated session-signing key.
 6. `DATABASE_URL` is automatically wired from Render Postgres.
@@ -39,16 +41,18 @@ Send billing updates to `POST /api/billing/webhook` and authenticate with:
 
 Use `BILLING_WEBHOOK_SECRET` as the shared secret.
 
-## 4. Configure Wix paywall entitlement
+## 4. Configure Wix OAuth and paywall entitlement
 
 The backend enforces paid-only save/customize server-side.
+
+- Start OAuth login at `GET /api/auth/wix/login`.
+- Handle Wix callback at `GET /api/auth/wix/callback` (sets signed app session cookie).
 
 - Endpoint: `POST /api/can-save`
 - Requires signed-in session.
 - Checks Wix Pricing Plan orders for the authenticated member (`externalMemberId`) with:
-  - statuses `ACTIVE` or `PENDING`
-  - `paymentStatus = PAID`
-  - matching plan IDs (`WIX_PAID_PLAN_IDS`) or plan names (`WIX_PAID_PLAN_NAMES`)
+  - status `ACTIVE`
+  - matching plan IDs (`WIX_PAID_PLAN_IDS`)
 
 Write operations (projects, presets, settings, and catalog customization routes) are blocked unless entitlement passes.
 

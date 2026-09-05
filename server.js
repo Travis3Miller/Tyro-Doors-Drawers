@@ -12,11 +12,10 @@ const PUBLIC_USER_ID = "public";
 const SERVE_STATIC = process.env.SERVE_STATIC !== "false";
 
 const SESSION_COOKIE_NAME = "cabinet_session";
+const OAUTH_STATE_TTL_MS = 1000 * 60 * 10;
 const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 24 * 30);
 const PRO_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "paid", "pending"]);
-const PAID_ORDER_STATUSES = new Set(["ACTIVE", "PENDING"]);
 const DENIED_ORDER_STATUSES = new Set(["CANCELED", "ENDED", "PAUSED", "REFUNDED", "FAILED"]);
-const DEFAULT_PAID_PLAN_NAMES = ["Doors and Drawers Cutlister", "Job Cost Estimation"];
 const RETENTION_MONTHS = Number(process.env.DATA_RETENTION_MONTHS || 13);
 let legacyStoreQueue = Promise.resolve();
 const STATIC_FILES = new Set([
@@ -125,7 +124,7 @@ function getSessionSecret() {
   const persistentFallbacks = [
     ["IDENTITY_SHARED_SECRET", process.env.IDENTITY_SHARED_SECRET || ""],
     ["BILLING_WEBHOOK_SECRET", process.env.BILLING_WEBHOOK_SECRET || ""],
-    ["WIX_API_TOKEN", process.env.WIX_API_TOKEN || ""],
+    ["WIX_CLIENT_SECRET", process.env.WIX_CLIENT_SECRET || ""],
     ["DATABASE_URL", process.env.DATABASE_URL || ""]
   ];
   const persistentFallback = persistentFallbacks.find(([, value]) => value);
@@ -187,6 +186,141 @@ function verifySessionToken(token, secret) {
   }
 }
 
+function encodeState(payload, secret) {
+  const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const signature = signHmac(encoded, secret);
+  return `${encoded}.${signature}`;
+}
+
+function decodeState(token, secret) {
+  if (!token || typeof token !== "string") {
+    return null;
+  }
+  const parts = token.split(".");
+  if (parts.length !== 2) {
+    return null;
+  }
+  const [encoded, signature] = parts;
+  const expected = signHmac(encoded, secret);
+  if (!safeCompare(signature, expected)) {
+    return null;
+  }
+  try {
+    return JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+  } catch (_err) {
+    return null;
+  }
+}
+
+function oauthConfigured() {
+  return Boolean((process.env.WIX_CLIENT_ID || "").trim() && (process.env.WIX_CLIENT_SECRET || "").trim());
+}
+
+function wixRedirectUri(req) {
+  const configured = (process.env.WIX_OAUTH_REDIRECT_URI || "").trim();
+  if (configured) {
+    return configured;
+  }
+  const forwardedProto = (req.get("x-forwarded-proto") || "").split(",")[0].trim();
+  const protocol = forwardedProto || req.protocol || "https";
+  const host = req.get("x-forwarded-host") || req.get("host") || "";
+  if (!host) {
+    return "";
+  }
+  return `${protocol}://${host}/api/auth/wix/callback`;
+}
+
+async function exchangeWixAuthCode(code, redirectUri, fetchImpl = fetch) {
+  const clientId = (process.env.WIX_CLIENT_ID || "").trim();
+  const clientSecret = (process.env.WIX_CLIENT_SECRET || "").trim();
+  if (!clientId || !clientSecret || !code || !redirectUri) {
+    return null;
+  }
+
+  const response = await fetchImpl("https://www.wix.com/oauth/access", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      grant_type: "authorization_code",
+      client_id: clientId,
+      client_secret: clientSecret,
+      code,
+      redirect_uri: redirectUri
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Wix OAuth exchange failed with ${response.status}.`);
+  }
+  const body = await response.json();
+  return body && typeof body.access_token === "string" ? body.access_token : null;
+}
+
+async function getWixClientToken(fetchImpl = fetch, cache = {}) {
+  const clientId = (process.env.WIX_CLIENT_ID || "").trim();
+  const clientSecret = (process.env.WIX_CLIENT_SECRET || "").trim();
+  if (!clientId || !clientSecret) {
+    return null;
+  }
+
+  if (cache.accessToken && Number.isFinite(cache.expiresAt) && cache.expiresAt - 30_000 > Date.now()) {
+    return cache.accessToken;
+  }
+
+  const response = await fetchImpl("https://www.wixapis.com/oauth2/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      grant_type: "client_credentials",
+      client_id: clientId,
+      client_secret: clientSecret
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Wix OAuth client token request failed with ${response.status}.`);
+  }
+
+  const body = await response.json();
+  if (!body || typeof body.access_token !== "string" || !body.access_token.trim()) {
+    throw new Error("Wix OAuth client token response did not include access_token.");
+  }
+
+  const expiresIn = Number(body.expires_in);
+  cache.accessToken = body.access_token.trim();
+  cache.expiresAt = Date.now() + (Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn * 1000 : 1000 * 60 * 4);
+  return cache.accessToken;
+}
+
+async function getWixMemberFromToken(accessToken, fetchImpl = fetch) {
+  if (!accessToken) {
+    return null;
+  }
+  const response = await fetchImpl("https://www.wixapis.com/members/v1/members/me", {
+    method: "GET",
+    headers: {
+      Authorization: "Bearer " + accessToken
+    }
+  });
+  if (!response.ok) {
+    throw new Error(`Wix member profile request failed with ${response.status}.`);
+  }
+  const body = await response.json();
+  if (body && body.member && typeof body.member === "object") {
+    return body.member;
+  }
+  return body && typeof body === "object" ? body : null;
+}
+
+function identityFromWixMember(member) {
+  const source = member && typeof member === "object" ? member : {};
+  const profile = source.profile && typeof source.profile === "object" ? source.profile : {};
+  const email = String(source.loginEmail || source.email || profile.email || "").trim().toLowerCase();
+  const externalMemberId = String(source.id || source.memberId || "").trim();
+  const name = String(profile.nickname || profile.displayName || source.name || "").trim();
+  return { email, name, externalMemberId };
+}
+
 function identityTrusted(req) {
   const timestamp = req.get("x-identity-timestamp") || "";
   const signature = req.get("x-identity-signature") || "";
@@ -245,16 +379,7 @@ function paidPlanIds() {
   return new Set(parseCsvEnv(process.env.WIX_PAID_PLAN_IDS));
 }
 
-function paidPlanNames() {
-  const configured = parseCsvEnv(process.env.WIX_PAID_PLAN_NAMES);
-  return new Set((configured.length ? configured : DEFAULT_PAID_PLAN_NAMES).map((name) => name.toLowerCase()));
-}
-
 function normalizeOrderStatus(value) {
-  return String(value || "").trim().toUpperCase();
-}
-
-function normalizePaymentStatus(value) {
   return String(value || "").trim().toUpperCase();
 }
 
@@ -271,19 +396,16 @@ function mapWixStatusToSubscriptionStatus(status) {
 
 function hasPaidWixAccess(orders = []) {
   const ids = paidPlanIds();
-  const names = paidPlanNames();
-  const useIds = ids.size > 0;
+  if (!ids.size) {
+    return false;
+  }
 
   return orders.some((order) => {
     const status = normalizeOrderStatus(order.status);
-    const paymentStatus = normalizePaymentStatus(order.paymentStatus);
-    if (!PAID_ORDER_STATUSES.has(status) || paymentStatus !== "PAID") {
+    if (status !== "ACTIVE") {
       return false;
     }
-    if (useIds) {
-      return ids.has(String(order.planId || "").trim());
-    }
-    return names.has(String(order.planName || "").trim().toLowerCase());
+    return ids.has(String(order.planId || "").trim());
   });
 }
 
@@ -291,21 +413,23 @@ function canDenyFromWixOrders(orders = []) {
   return orders.some((order) => DENIED_ORDER_STATUSES.has(normalizeOrderStatus(order.status)));
 }
 
-async function getWixOrdersForMember(memberId, fetchImpl = fetch) {
-  const wixApiToken = process.env.WIX_API_TOKEN || "";
-  if (!memberId || !wixApiToken) {
+async function getWixOrdersForMember(memberId, fetchImpl = fetch, tokenCache = {}) {
+  if (!memberId) {
+    return null;
+  }
+  const wixAccessToken = await getWixClientToken(fetchImpl, tokenCache);
+  if (!wixAccessToken) {
     return null;
   }
 
   const url = new URL("https://www.wixapis.com/pricing-plans/v2/orders");
   url.searchParams.append("buyerIds", memberId);
   url.searchParams.append("orderStatuses", "ACTIVE");
-  url.searchParams.append("orderStatuses", "PENDING");
 
   const response = await fetchImpl(url.toString(), {
     method: "GET",
     headers: {
-      Authorization: "Bearer " + wixApiToken,
+      Authorization: "Bearer " + wixAccessToken,
       "Content-Type": "application/json"
     }
   });
@@ -327,27 +451,26 @@ async function getWixOrdersForMember(memberId, fetchImpl = fetch) {
   return [];
 }
 
-async function evaluateSaveAccessForUser(user, userStore, fetchImpl = fetch) {
+async function evaluateSaveAccessForUser(user, userStore, fetchImpl = fetch, tokenCache = {}) {
   if (!user) {
     return { allowed: false, reason: "unauthenticated" };
   }
 
-  if (resolvePlanForUser(user) === "pro") {
-    return { allowed: true, reason: "stored-entitlement" };
+  if (!paidPlanIds().size) {
+    return { allowed: false, reason: "no-paid-plan-ids" };
   }
 
   const memberId = user.externalMemberId || "";
-  const wixOrders = await getWixOrdersForMember(memberId, fetchImpl);
+  const wixOrders = await getWixOrdersForMember(memberId, fetchImpl, tokenCache);
   if (!wixOrders) {
-    return { allowed: false, reason: "no-wix-member-or-token" };
+    return { allowed: false, reason: "no-wix-member-or-oauth-client" };
   }
 
   const allowed = hasPaidWixAccess(wixOrders);
   if (allowed) {
     const matchingOrder = wixOrders.find((order) => {
       const status = normalizeOrderStatus(order.status);
-      const paymentStatus = normalizePaymentStatus(order.paymentStatus);
-      return PAID_ORDER_STATUSES.has(status) && paymentStatus === "PAID";
+      return status === "ACTIVE";
     }) || null;
 
     const subscriptionStatus = mapWixStatusToSubscriptionStatus(matchingOrder ? matchingOrder.status : "ACTIVE");
@@ -673,6 +796,7 @@ function createApp(options = {}) {
     console.warn(`SESSION_SECRET is not set. Deriving the session signing secret from ${sessionSecretMode.slice(8)}; set SESSION_SECRET for an explicit persistent secret.`);
   }
   const wixFetch = options.wixFetch || fetch;
+  const wixClientTokenCache = { accessToken: "", expiresAt: 0 };
   const requestRateLimiter = rateLimit({
     windowMs: 60 * 1000,
     limit: 600,
@@ -740,7 +864,7 @@ function createApp(options = {}) {
 
   async function requireSubscriber(req, res, next) {
     try {
-      const check = await evaluateSaveAccessForUser(req.currentUser, userStore, wixFetch);
+      const check = await evaluateSaveAccessForUser(req.currentUser, userStore, wixFetch, wixClientTokenCache);
       if (!check.allowed) {
         res.status(403).json({
           error: "Active paid subscription required.",
@@ -794,6 +918,90 @@ function createApp(options = {}) {
       user: userSummary(user),
       plan: resolvePlanForUser(user)
     });
+  });
+
+  app.get("/api/auth/wix/login", authRateLimiter, (req, res) => {
+    if (!oauthConfigured()) {
+      res.status(503).json({ error: "Wix OAuth is not configured." });
+      return;
+    }
+    const redirectUri = wixRedirectUri(req);
+    if (!redirectUri) {
+      res.status(500).json({ error: "Could not determine Wix OAuth redirect URL." });
+      return;
+    }
+
+    const state = encodeState({
+      nonce: crypto.randomBytes(12).toString("hex"),
+      ts: Date.now()
+    }, sessionSecret);
+    const oauthUrl = new URL("https://www.wix.com/oauth/authorize");
+    oauthUrl.searchParams.set("client_id", (process.env.WIX_CLIENT_ID || "").trim());
+    oauthUrl.searchParams.set("response_type", "code");
+    oauthUrl.searchParams.set("redirect_uri", redirectUri);
+    oauthUrl.searchParams.set("state", state);
+
+    const scope = (process.env.WIX_OAUTH_SCOPE || "").trim();
+    if (scope) {
+      oauthUrl.searchParams.set("scope", scope);
+    }
+
+    res.redirect(oauthUrl.toString());
+  });
+
+  app.get("/api/auth/wix/callback", authRateLimiter, async (req, res) => {
+    try {
+      await userStoreReady;
+      const { code = "", state = "", error = "" } = req.query || {};
+      if (error) {
+        res.status(401).json({ error: `Wix OAuth failed: ${error}` });
+        return;
+      }
+
+      const decodedState = decodeState(state, sessionSecret);
+      if (!decodedState || !Number.isFinite(decodedState.ts) || Date.now() - decodedState.ts > OAUTH_STATE_TTL_MS) {
+        res.status(400).json({ error: "Invalid or expired OAuth state." });
+        return;
+      }
+      if (!code || typeof code !== "string") {
+        res.status(400).json({ error: "Missing OAuth authorization code." });
+        return;
+      }
+
+      const redirectUri = wixRedirectUri(req);
+      const accessToken = await exchangeWixAuthCode(code, redirectUri, wixFetch);
+      if (!accessToken) {
+        res.status(503).json({ error: "Could not exchange Wix OAuth code." });
+        return;
+      }
+
+      const wixMember = await getWixMemberFromToken(accessToken, wixFetch);
+      const identity = identityFromWixMember(wixMember);
+      if (!identity.email || !identity.externalMemberId) {
+        res.status(400).json({ error: "Wix OAuth member payload missing email or member ID." });
+        return;
+      }
+
+      const user = await userStore.upsertUserFromIdentity(identity);
+      const token = createSessionToken(
+        { userId: user.id, exp: Date.now() + SESSION_TTL_MS },
+        sessionSecret
+      );
+      res.setHeader("Set-Cookie", serializeCookie(SESSION_COOKIE_NAME, token, {
+        path: "/",
+        httpOnly: true,
+        sameSite: "Lax",
+        secure: process.env.NODE_ENV === "production",
+        maxAge: Math.floor(SESSION_TTL_MS / 1000)
+      }));
+      res.json({
+        authenticated: true,
+        user: userSummary(user),
+        plan: resolvePlanForUser(user)
+      });
+    } catch (err) {
+      res.status(500).json({ error: "Could not complete Wix OAuth sign in." });
+    }
   });
 
   app.post("/api/auth/sso", authRateLimiter, async (req, res) => {
@@ -880,7 +1088,7 @@ function createApp(options = {}) {
   app.post("/api/can-save", requireAuth, async (req, res) => {
     try {
       await userStoreReady;
-      const check = await evaluateSaveAccessForUser(req.currentUser, userStore, wixFetch);
+      const check = await evaluateSaveAccessForUser(req.currentUser, userStore, wixFetch, wixClientTokenCache);
       if (check.user) {
         req.currentUser = check.user;
       }

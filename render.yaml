@@ -30,15 +30,19 @@ services:
         sync: false
       - key: BILLING_WEBHOOK_SECRET
         sync: false
-      - key: WIX_API_TOKEN
+      - key: WIX_CLIENT_ID
+        sync: false
+      - key: WIX_CLIENT_SECRET
         sync: false
       - key: WIX_PAID_PLAN_IDS
         sync: false
-      - key: WIX_PAID_PLAN_NAMES
-        value: Doors and Drawers Cutlister
       - key: DATA_RETENTION_MONTHS
         value: "13"
       - key: WIX_UPGRADE_URL
+        sync: false
+      - key: WIX_OAUTH_REDIRECT_URI
+        sync: false
+      - key: WIX_OAUTH_SCOPE
         sync: false
       # Set this in Render dashboard to your real GitHub Pages URL.
       # - key: CORS_ORIGINS

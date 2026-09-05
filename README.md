@@ -7,7 +7,9 @@ Node + Express API and static frontend for the cutlister app.
 - `GET /api/health` returns service health.
 - `GET /api/config` returns resolved plan (`free` or `pro`) and `upgradeUrl` from `WIX_UPGRADE_URL`.
 - `GET /api/auth/session` returns current auth state.
-- `POST /api/auth/sso` accepts trusted identity payload, creates/updates the user, and sets signed `cabinet_session` cookie.
+- `GET /api/auth/wix/login` starts Wix OAuth sign-in.
+- `GET /api/auth/wix/callback` completes Wix OAuth sign-in, creates/updates the user, and sets signed `cabinet_session` cookie.
+- `POST /api/auth/sso` remains available for trusted server-to-server identity exchange.
 - `POST /api/auth/logout` clears the session cookie.
 - `POST /api/billing/webhook` updates user billing state server-side.
 - `POST /api/can-save` checks if the signed-in member currently has paid save/customize access.
@@ -40,18 +42,16 @@ Payload should include `email` and/or external identifiers plus `plan` and `subs
 
 ## Wix paywall checks
 
-When `WIX_API_TOKEN` is configured, the API verifies Wix Pricing Plan orders using:
+When Wix OAuth client credentials are configured, the API verifies Wix Pricing Plan orders using:
 
 - `GET https://www.wixapis.com/pricing-plans/v2/orders`
 - `buyerIds=<externalMemberId>`
 - `orderStatuses=ACTIVE`
-- `orderStatuses=PENDING`
 
 Access is allowed only when an order is:
 
-- status `ACTIVE` or `PENDING`
-- payment status `PAID`
-- matching configured paid plan IDs (`WIX_PAID_PLAN_IDS`) or paid plan names (`WIX_PAID_PLAN_NAMES`)
+- status `ACTIVE`
+- matching configured paid plan IDs (`WIX_PAID_PLAN_IDS`)
 
 No-access statuses include: `CANCELED`, `ENDED`, `PAUSED`, `REFUNDED`, `FAILED`.
 
@@ -65,13 +65,15 @@ Required for production:
 - `SESSION_SECRET` (strongly recommended; when omitted the server derives a stable fallback from another configured backend secret, but an explicit dedicated value is still preferred)
 - `IDENTITY_SHARED_SECRET`
 - `BILLING_WEBHOOK_SECRET`
-- `WIX_API_TOKEN`
+- `WIX_CLIENT_ID`
+- `WIX_CLIENT_SECRET`
 - `WIX_UPGRADE_URL`
 
 Optional:
 
 - `WIX_PAID_PLAN_IDS` (recommended, comma-separated Wix plan IDs)
-- `WIX_PAID_PLAN_NAMES` (comma-separated plan names, used when IDs are not set)
+- `WIX_OAUTH_REDIRECT_URI` (defaults to `<api-origin>/api/auth/wix/callback` if omitted)
+- `WIX_OAUTH_SCOPE`
 - `DATA_RETENTION_MONTHS` (default `13`)
 - `CORS_ORIGINS`
 - `ALLOW_GITHUB_PAGES` (default `true`)
