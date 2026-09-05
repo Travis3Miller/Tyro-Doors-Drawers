@@ -19,6 +19,7 @@ const DENIED_ORDER_STATUSES = new Set(["CANCELED", "ENDED", "PAUSED", "REFUNDED"
 const DEFAULT_PAID_PLAN_NAMES = ["Doors and Drawers Cutlister", "Job Cost Estimation"];
 const RETENTION_MONTHS = Number(process.env.DATA_RETENTION_MONTHS || 13);
 let legacyStoreQueue = Promise.resolve();
+let generatedSessionSecret = "";
 const STATIC_FILES = new Set([
   "index.html",
   "script.js",
@@ -119,10 +120,14 @@ function serializeCookie(name, value, options = {}) {
 
 function getSessionSecret() {
   const secret = process.env.SESSION_SECRET || "";
-  if (!secret) {
-    throw new Error("SESSION_SECRET is required.");
+  if (secret) {
+    return secret;
   }
-  return secret;
+  if (!generatedSessionSecret) {
+    generatedSessionSecret = crypto.randomBytes(32).toString("hex");
+    console.warn("SESSION_SECRET is not set. Using an ephemeral in-memory secret; sessions will be reset on restart.");
+  }
+  return generatedSessionSecret;
 }
 
 function createSessionToken(payload, secret) {
