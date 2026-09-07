@@ -14,6 +14,7 @@ const originalEnv = {
   WIX_CLIENT_SECRET: process.env.WIX_CLIENT_SECRET,
   WIX_OAUTH_REDIRECT_URI: process.env.WIX_OAUTH_REDIRECT_URI,
   WIX_PAID_PLAN_IDS: process.env.WIX_PAID_PLAN_IDS,
+  SESSION_COOKIE_SAME_SITE: process.env.SESSION_COOKIE_SAME_SITE,
   USER_STORE_FILE: process.env.USER_STORE_FILE,
   LEGACY_STORE_FILE: process.env.LEGACY_STORE_FILE,
   WIX_UPGRADE_URL: process.env.WIX_UPGRADE_URL,
@@ -119,6 +120,7 @@ test("health/config, auth session, project isolation, and billing entitlement", 
     if (originalEnv.WIX_CLIENT_SECRET === undefined) delete process.env.WIX_CLIENT_SECRET; else process.env.WIX_CLIENT_SECRET = originalEnv.WIX_CLIENT_SECRET;
     if (originalEnv.WIX_OAUTH_REDIRECT_URI === undefined) delete process.env.WIX_OAUTH_REDIRECT_URI; else process.env.WIX_OAUTH_REDIRECT_URI = originalEnv.WIX_OAUTH_REDIRECT_URI;
     if (originalEnv.WIX_PAID_PLAN_IDS === undefined) delete process.env.WIX_PAID_PLAN_IDS; else process.env.WIX_PAID_PLAN_IDS = originalEnv.WIX_PAID_PLAN_IDS;
+    if (originalEnv.SESSION_COOKIE_SAME_SITE === undefined) delete process.env.SESSION_COOKIE_SAME_SITE; else process.env.SESSION_COOKIE_SAME_SITE = originalEnv.SESSION_COOKIE_SAME_SITE;
     if (originalEnv.USER_STORE_FILE === undefined) delete process.env.USER_STORE_FILE; else process.env.USER_STORE_FILE = originalEnv.USER_STORE_FILE;
     if (originalEnv.LEGACY_STORE_FILE === undefined) delete process.env.LEGACY_STORE_FILE; else process.env.LEGACY_STORE_FILE = originalEnv.LEGACY_STORE_FILE;
     if (originalEnv.WIX_UPGRADE_URL === undefined) delete process.env.WIX_UPGRADE_URL; else process.env.WIX_UPGRADE_URL = originalEnv.WIX_UPGRADE_URL;
@@ -462,6 +464,7 @@ test("server boots without SESSION_SECRET and keeps sessions valid across restar
     if (originalEnv.WIX_CLIENT_SECRET === undefined) delete process.env.WIX_CLIENT_SECRET; else process.env.WIX_CLIENT_SECRET = originalEnv.WIX_CLIENT_SECRET;
     if (originalEnv.WIX_OAUTH_REDIRECT_URI === undefined) delete process.env.WIX_OAUTH_REDIRECT_URI; else process.env.WIX_OAUTH_REDIRECT_URI = originalEnv.WIX_OAUTH_REDIRECT_URI;
     if (originalEnv.WIX_PAID_PLAN_IDS === undefined) delete process.env.WIX_PAID_PLAN_IDS; else process.env.WIX_PAID_PLAN_IDS = originalEnv.WIX_PAID_PLAN_IDS;
+    if (originalEnv.SESSION_COOKIE_SAME_SITE === undefined) delete process.env.SESSION_COOKIE_SAME_SITE; else process.env.SESSION_COOKIE_SAME_SITE = originalEnv.SESSION_COOKIE_SAME_SITE;
     if (originalEnv.USER_STORE_FILE === undefined) delete process.env.USER_STORE_FILE; else process.env.USER_STORE_FILE = originalEnv.USER_STORE_FILE;
     if (originalEnv.LEGACY_STORE_FILE === undefined) delete process.env.LEGACY_STORE_FILE; else process.env.LEGACY_STORE_FILE = originalEnv.LEGACY_STORE_FILE;
     if (originalEnv.WIX_UPGRADE_URL === undefined) delete process.env.WIX_UPGRADE_URL; else process.env.WIX_UPGRADE_URL = originalEnv.WIX_UPGRADE_URL;
@@ -532,4 +535,71 @@ test("server boots without SESSION_SECRET and keeps sessions valid across restar
   assert.equal(isolatedSessionRes.status, 200);
   const isolatedSessionBody = await isolatedSessionRes.json();
   assert.equal(isolatedSessionBody.authenticated, false);
+});
+
+test("production auth cookie uses SameSite=None by default", async (t) => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "tyro-dd-cookie-"));
+  const userStoreFile = path.join(tempDir, "user-store.json");
+  const legacyStoreFile = path.join(tempDir, "legacy-store.json");
+
+  process.env.NODE_ENV = "production";
+  process.env.SESSION_SECRET = "test-session-secret";
+  process.env.IDENTITY_SHARED_SECRET = "identity-secret";
+  process.env.BILLING_WEBHOOK_SECRET = "billing-secret";
+  process.env.WIX_CLIENT_ID = "wix-client-id";
+  process.env.WIX_CLIENT_SECRET = "wix-client-secret";
+  process.env.WIX_PAID_PLAN_IDS = "plan-doors";
+  process.env.USER_STORE_FILE = userStoreFile;
+  process.env.LEGACY_STORE_FILE = legacyStoreFile;
+  process.env.WIX_UPGRADE_URL = "https://example.com/upgrade";
+  delete process.env.SESSION_COOKIE_SAME_SITE;
+
+  const { startServer } = loadServerModule();
+  const { server } = await startServer({ port: 0 });
+
+  t.after(async () => {
+    if (server.listening) {
+      await new Promise((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      });
+    }
+    if (originalEnv.NODE_ENV === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = originalEnv.NODE_ENV;
+    if (originalEnv.SESSION_SECRET === undefined) delete process.env.SESSION_SECRET; else process.env.SESSION_SECRET = originalEnv.SESSION_SECRET;
+    if (originalEnv.IDENTITY_SHARED_SECRET === undefined) delete process.env.IDENTITY_SHARED_SECRET; else process.env.IDENTITY_SHARED_SECRET = originalEnv.IDENTITY_SHARED_SECRET;
+    if (originalEnv.BILLING_WEBHOOK_SECRET === undefined) delete process.env.BILLING_WEBHOOK_SECRET; else process.env.BILLING_WEBHOOK_SECRET = originalEnv.BILLING_WEBHOOK_SECRET;
+    if (originalEnv.WIX_CLIENT_ID === undefined) delete process.env.WIX_CLIENT_ID; else process.env.WIX_CLIENT_ID = originalEnv.WIX_CLIENT_ID;
+    if (originalEnv.WIX_CLIENT_SECRET === undefined) delete process.env.WIX_CLIENT_SECRET; else process.env.WIX_CLIENT_SECRET = originalEnv.WIX_CLIENT_SECRET;
+    if (originalEnv.WIX_OAUTH_REDIRECT_URI === undefined) delete process.env.WIX_OAUTH_REDIRECT_URI; else process.env.WIX_OAUTH_REDIRECT_URI = originalEnv.WIX_OAUTH_REDIRECT_URI;
+    if (originalEnv.WIX_PAID_PLAN_IDS === undefined) delete process.env.WIX_PAID_PLAN_IDS; else process.env.WIX_PAID_PLAN_IDS = originalEnv.WIX_PAID_PLAN_IDS;
+    if (originalEnv.SESSION_COOKIE_SAME_SITE === undefined) delete process.env.SESSION_COOKIE_SAME_SITE; else process.env.SESSION_COOKIE_SAME_SITE = originalEnv.SESSION_COOKIE_SAME_SITE;
+    if (originalEnv.USER_STORE_FILE === undefined) delete process.env.USER_STORE_FILE; else process.env.USER_STORE_FILE = originalEnv.USER_STORE_FILE;
+    if (originalEnv.LEGACY_STORE_FILE === undefined) delete process.env.LEGACY_STORE_FILE; else process.env.LEGACY_STORE_FILE = originalEnv.LEGACY_STORE_FILE;
+    if (originalEnv.WIX_UPGRADE_URL === undefined) delete process.env.WIX_UPGRADE_URL; else process.env.WIX_UPGRADE_URL = originalEnv.WIX_UPGRADE_URL;
+    if (originalEnv.RENDER_SERVICE_ID === undefined) delete process.env.RENDER_SERVICE_ID; else process.env.RENDER_SERVICE_ID = originalEnv.RENDER_SERVICE_ID;
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const identityPayload = JSON.stringify({
+    email: "cookie-test@example.com",
+    name: "Cookie Test",
+    externalMemberId: "member-cookie-test"
+  });
+  const timestamp = String(Date.now());
+  const signature = signIdentity(process.env.IDENTITY_SHARED_SECRET, timestamp, identityPayload);
+  const signInRes = await jsonRequest(baseUrl, "/api/auth/sso", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-identity-timestamp": timestamp,
+      "x-identity-signature": signature
+    },
+    body: identityPayload
+  });
+
+  assert.equal(signInRes.status, 200);
+  const setCookie = signInRes.headers.get("set-cookie");
+  assert.ok(setCookie && setCookie.includes("cabinet_session="));
+  assert.ok(setCookie && setCookie.includes("SameSite=None"));
+  assert.ok(setCookie && setCookie.includes("Secure"));
 });
