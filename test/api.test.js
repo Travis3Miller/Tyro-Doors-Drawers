@@ -669,3 +669,37 @@ test("production auth cookie honors SESSION_COOKIE_SAME_SITE override", async (t
   assert.ok(setCookie && setCookie.includes("cabinet_session="));
   assert.ok(setCookie && setCookie.includes("SameSite=Strict"));
 });
+
+test("invalid SESSION_COOKIE_SAME_SITE fails fast", async (t) => {
+  t.after(() => {
+    if (originalEnv.NODE_ENV === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = originalEnv.NODE_ENV;
+    if (originalEnv.SESSION_SECRET === undefined) delete process.env.SESSION_SECRET; else process.env.SESSION_SECRET = originalEnv.SESSION_SECRET;
+    if (originalEnv.IDENTITY_SHARED_SECRET === undefined) delete process.env.IDENTITY_SHARED_SECRET; else process.env.IDENTITY_SHARED_SECRET = originalEnv.IDENTITY_SHARED_SECRET;
+    if (originalEnv.BILLING_WEBHOOK_SECRET === undefined) delete process.env.BILLING_WEBHOOK_SECRET; else process.env.BILLING_WEBHOOK_SECRET = originalEnv.BILLING_WEBHOOK_SECRET;
+    if (originalEnv.WIX_CLIENT_ID === undefined) delete process.env.WIX_CLIENT_ID; else process.env.WIX_CLIENT_ID = originalEnv.WIX_CLIENT_ID;
+    if (originalEnv.WIX_CLIENT_SECRET === undefined) delete process.env.WIX_CLIENT_SECRET; else process.env.WIX_CLIENT_SECRET = originalEnv.WIX_CLIENT_SECRET;
+    if (originalEnv.WIX_OAUTH_REDIRECT_URI === undefined) delete process.env.WIX_OAUTH_REDIRECT_URI; else process.env.WIX_OAUTH_REDIRECT_URI = originalEnv.WIX_OAUTH_REDIRECT_URI;
+    if (originalEnv.WIX_PAID_PLAN_IDS === undefined) delete process.env.WIX_PAID_PLAN_IDS; else process.env.WIX_PAID_PLAN_IDS = originalEnv.WIX_PAID_PLAN_IDS;
+    if (originalEnv.SESSION_COOKIE_SAME_SITE === undefined) delete process.env.SESSION_COOKIE_SAME_SITE; else process.env.SESSION_COOKIE_SAME_SITE = originalEnv.SESSION_COOKIE_SAME_SITE;
+    if (originalEnv.USER_STORE_FILE === undefined) delete process.env.USER_STORE_FILE; else process.env.USER_STORE_FILE = originalEnv.USER_STORE_FILE;
+    if (originalEnv.LEGACY_STORE_FILE === undefined) delete process.env.LEGACY_STORE_FILE; else process.env.LEGACY_STORE_FILE = originalEnv.LEGACY_STORE_FILE;
+    if (originalEnv.WIX_UPGRADE_URL === undefined) delete process.env.WIX_UPGRADE_URL; else process.env.WIX_UPGRADE_URL = originalEnv.WIX_UPGRADE_URL;
+    if (originalEnv.RENDER_SERVICE_ID === undefined) delete process.env.RENDER_SERVICE_ID; else process.env.RENDER_SERVICE_ID = originalEnv.RENDER_SERVICE_ID;
+  });
+
+  process.env.NODE_ENV = "production";
+  process.env.SESSION_SECRET = "test-session-secret";
+  process.env.IDENTITY_SHARED_SECRET = "identity-secret";
+  process.env.BILLING_WEBHOOK_SECRET = "billing-secret";
+  process.env.WIX_CLIENT_ID = "wix-client-id";
+  process.env.WIX_CLIENT_SECRET = "wix-client-secret";
+  process.env.WIX_PAID_PLAN_IDS = "plan-doors";
+  process.env.WIX_UPGRADE_URL = "https://example.com/upgrade";
+  process.env.SESSION_COOKIE_SAME_SITE = "invalid-value";
+
+  const { startServer } = loadServerModule();
+  await assert.rejects(
+    () => startServer({ port: 0 }),
+    /SESSION_COOKIE_SAME_SITE must be one of None, Lax, or Strict/
+  );
+});

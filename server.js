@@ -119,7 +119,10 @@ function serializeCookie(name, value, options = {}) {
 
 function resolveSessionCookieSameSite() {
   const configured = String(process.env.SESSION_COOKIE_SAME_SITE || "").trim().toLowerCase();
-  if (VALID_SAME_SITE_VALUES.has(configured)) {
+  if (configured) {
+    if (!VALID_SAME_SITE_VALUES.has(configured)) {
+      throw new Error("SESSION_COOKIE_SAME_SITE must be one of None, Lax, or Strict.");
+    }
     return configured[0].toUpperCase() + configured.slice(1);
   }
   return process.env.NODE_ENV === "production" ? "None" : "Lax";
