@@ -105,14 +105,6 @@ function serializeCookie(name, value, options = {}) {
   if (options.httpOnly !== false) {
     parts.push("HttpOnly");
   }
-
-  function resolveSessionCookieSameSite() {
-    const configured = String(process.env.SESSION_COOKIE_SAME_SITE || "").trim().toLowerCase();
-    if (VALID_SAME_SITE_VALUES.has(configured)) {
-      return configured[0].toUpperCase() + configured.slice(1);
-    }
-    return process.env.NODE_ENV === "production" ? "None" : "Lax";
-  }
   if (options.sameSite) {
     parts.push(`SameSite=${options.sameSite}`);
   }
@@ -123,6 +115,14 @@ function serializeCookie(name, value, options = {}) {
     parts.push(`Max-Age=${Math.max(0, Math.floor(options.maxAge))}`);
   }
   return parts.join("; ");
+}
+
+function resolveSessionCookieSameSite() {
+  const configured = String(process.env.SESSION_COOKIE_SAME_SITE || "").trim().toLowerCase();
+  if (VALID_SAME_SITE_VALUES.has(configured)) {
+    return configured[0].toUpperCase() + configured.slice(1);
+  }
+  return process.env.NODE_ENV === "production" ? "None" : "Lax";
 }
 
 function getSessionSecret() {
