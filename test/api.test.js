@@ -74,8 +74,21 @@ test("health/config, auth session, project isolation, and billing entitlement", 
         expires_in: 300
       }), { status: 200, headers: { "content-type": "application/json" } });
     }
-    if (url === "https://www.wixapis.com/members/v1/members/me") {
+    if (url === "https://www.wixapis.com/members/v1/members/my?fieldSet=FULL") {
       return new Response(JSON.stringify(wixMemberResponse), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (url === "https://www.wixapis.com/pricing-plans/v2/member/orders") {
+      return new Response(JSON.stringify({
+        orders: [
+          {
+            id: "order-oauth",
+            status: "ACTIVE",
+            paymentStatus: "PAID",
+            planId: "plan-doors",
+            planName: "Doors and Drawers Cutlister"
+          }
+        ]
+      }), { status: 200, headers: { "content-type": "application/json" } });
     }
     const parsed = new URL(url);
     const buyerId = parsed.searchParams.get("buyerIds");
@@ -168,6 +181,9 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   assert.equal(wixCallbackBody.user.externalMemberId, "member-oauth");
   assert.equal(wixCallbackBody.user.email, "oauth-user@example.com");
   assert.equal(wixCallbackBody.user.name, "OAuth User");
+  assert.equal(wixCallbackBody.user.plan, "pro");
+  assert.equal(wixCallbackBody.user.subscriptionStatus, "active");
+  assert.equal(wixCallbackBody.plan, "pro");
   const wixCallbackReplayRes = await jsonRequest(baseUrl, `/api/auth/wix/callback?code=test-code&state=${encodeURIComponent(oauthState)}`);
   assert.equal(wixCallbackReplayRes.status, 400);
 

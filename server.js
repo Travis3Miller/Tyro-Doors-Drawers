@@ -319,7 +319,7 @@ async function getWixMemberFromToken(accessToken, fetchImpl = fetch) {
   if (!accessToken) {
     return null;
   }
-  const response = await fetchImpl("https://www.wixapis.com/members/v1/members/me", {
+  const response = await fetchImpl("https://www.wixapis.com/members/v1/members/my?fieldSet=FULL", {
     method: "GET",
     headers: {
       Authorization: "Bearer " + accessToken
@@ -453,6 +453,51 @@ function canDenyFromWixOrders(orders = []) {
   return orders.some((order) => DENIED_ORDER_STATUSES.has(normalizeOrderStatus(order.status)));
 }
 
+function extractWixOrders(body) {
+  if (Array.isArray(body)) {
+    return body;
+  }
+  if (body && Array.isArray(body.orders)) {
+    return body.orders;
+  }
+  if (body && body.orders && Array.isArray(body.orders.results)) {
+    return body.orders.results;
+  }
+  if (body && body.data && Array.isArray(body.data.orders)) {
+    return body.data.orders;
+  }
+  return [];
+}
+
+function pickWixSubscriptionOrder(orders = []) {
+  const preferredStatuses = ["ACTIVE", "PENDING", "PAUSED", "ENDED", "CANCELED", "FAILED", "REFUNDED"];
+  for (const status of preferredStatuses) {
+    const match = orders.find((order) => normalizeOrderStatus(order.status) === status);
+    if (match) {
+      return match;
+    }
+  }
+  return orders[0] || null;
+}
+
+async function getWixOrdersForCurrentMember(accessToken, fetchImpl = fetch) {
+  if (!accessToken) {
+    return null;
+  }
+  const response = await fetchImpl("https://www.wixapis.com/pricing-plans/v2/member/orders", {
+    method: "GET",
+    headers: {
+      Authorization: "Bearer " + accessToken,
+      "Content-Type": "application/json"
+    }
+  });
+  if (!response.ok) {
+    throw new Error(`Wix member orders request failed with ${response.status}.`);
+  }
+  const body = await response.json();
+  return extractWixOrders(body);
+}
+
 async function getWixOrdersForMember(memberId, fetchImpl = fetch, tokenCache = {}) {
   if (!memberId) {
     return null;
@@ -479,16 +524,7 @@ async function getWixOrdersForMember(memberId, fetchImpl = fetch, tokenCache = {
   }
 
   const body = await response.json();
-  if (Array.isArray(body.orders)) {
-    return body.orders;
-  }
-  if (body && body.orders && Array.isArray(body.orders.results)) {
-    return body.orders.results;
-  }
-  if (body && body.data && Array.isArray(body.data.orders)) {
-    return body.data.orders;
-  }
-  return [];
+  return extractWixOrders(body);
 }
 
 async function evaluateSaveAccessForUser(user, userStore, fetchImpl = fetch, tokenCache = {}) {
@@ -1062,7 +1098,26 @@ function createApp(options = {}) {
         return;
       }
 
-      const user = await userStore.upsertUserFromIdentity(identity);
+      let user = await userStore.upsertUserFromIdentity(identity);
+      const wixOrders = await getWixOrdersForCurrentMember(accessToken, wixFetch);
+      if (Array.isArray(wixOrders) && wixOrders.length) {
+        const matchingOrder = pickWixSubscriptionOrder(wixOrders);
+        const subscriptionStatus = mapWixStatusToSubscriptionStatus(matchingOrder ? matchingOrder.status : "inactive");
+        const plan = paidPlanIds().size
+          ? hasPaidWixAccess(wixOrders) ? "pro" : "free"
+          : user.plan;
+        const updatedUser = await userStore.updateUserBilling({
+          userId: user.id,
+          email: user.email,
+          externalMemberId: user.externalMemberId,
+          externalCustomerId: user.externalCustomerId,
+          plan,
+          subscriptionStatus
+        });
+        if (updatedUser) {
+          user = updatedUser;
+        }
+      }
       const token = createSessionToken(
         { userId: user.id, exp: Date.now() + SESSION_TTL_MS },
         sessionSecret
