@@ -582,27 +582,32 @@ async function loadCatalog() {
     state.projects = localProjects();
     state.settings = localSettings();
   }
+}
 
-  async function refreshWelcomeBanner() {
-    const banner = byId("welcomeBanner");
-    if (!banner) {
-      return;
+async function refreshWelcomeBanner() {
+  const banner = byId("welcomeBanner");
+  if (!banner) {
+    return;
+  }
+  banner.textContent = "Welcome";
+
+  if (await ensureDataMode() !== "api") {
+    return;
+  }
+
+  try {
+    const session = await apiJson("/api/auth/session");
+    if (session && session.authenticated && session.user) {
+      const rawName = String(session.user.name || "").trim();
+      const firstName = rawName ? rawName.split(/\s+/)[0] : "";
+      const rawEmail = String(session.user.email || "").trim();
+      const atIndex = rawEmail.indexOf("@");
+      const emailName = atIndex > 0 ? rawEmail.slice(0, atIndex).trim() : "";
+      const displayName = firstName || emailName || "there";
+      banner.textContent = `Welcome, ${displayName}`;
     }
+  } catch (_err) {
     banner.textContent = "Welcome";
-
-    if (await ensureDataMode() !== "api") {
-      return;
-    }
-
-    try {
-      const session = await apiJson("/api/auth/session");
-      if (session && session.authenticated && session.user) {
-        const displayName = session.user.name || session.user.email || "there";
-        banner.textContent = `Welcome, ${displayName}`;
-      }
-    } catch (_err) {
-      banner.textContent = "Welcome";
-    }
   }
 }
 
