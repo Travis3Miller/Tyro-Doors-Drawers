@@ -134,8 +134,7 @@ function getSessionCookieSameSite() {
   throw new Error("SESSION_COOKIE_SAME_SITE must be one of None, Lax, or Strict.");
 }
 
-function getSessionCookieOptions(maxAge) {
-  const sameSite = getSessionCookieSameSite();
+function getSessionCookieOptions(maxAge, sameSite = getSessionCookieSameSite()) {
   return {
     path: "/",
     httpOnly: true,
@@ -840,6 +839,7 @@ function createApp(options = {}) {
   } else if (sessionSecretMode.startsWith("derived:")) {
     console.warn(`SESSION_SECRET is not set. Deriving the session signing secret from ${sessionSecretMode.slice(8)}; set SESSION_SECRET for an explicit persistent secret.`);
   }
+  const sessionCookieSameSite = getSessionCookieSameSite();
   const wixFetch = options.wixFetch || fetch;
   const wixClientTokenCache = { accessToken: "", expiresAt: 0 };
   const wixOauthStates = new Map();
@@ -1060,7 +1060,7 @@ function createApp(options = {}) {
       );
       res.setHeader(
         "Set-Cookie",
-        serializeCookie(SESSION_COOKIE_NAME, token, getSessionCookieOptions(Math.floor(SESSION_TTL_MS / 1000)))
+        serializeCookie(SESSION_COOKIE_NAME, token, getSessionCookieOptions(Math.floor(SESSION_TTL_MS / 1000), sessionCookieSameSite))
       );
       res.json({
         authenticated: true,
@@ -1093,7 +1093,7 @@ function createApp(options = {}) {
       );
       res.setHeader(
         "Set-Cookie",
-        serializeCookie(SESSION_COOKIE_NAME, token, getSessionCookieOptions(Math.floor(SESSION_TTL_MS / 1000)))
+        serializeCookie(SESSION_COOKIE_NAME, token, getSessionCookieOptions(Math.floor(SESSION_TTL_MS / 1000), sessionCookieSameSite))
       );
 
       res.json({
@@ -1111,7 +1111,7 @@ function createApp(options = {}) {
   });
 
   app.post("/api/auth/logout", (_req, res) => {
-    res.setHeader("Set-Cookie", serializeCookie(SESSION_COOKIE_NAME, "", getSessionCookieOptions(0)));
+    res.setHeader("Set-Cookie", serializeCookie(SESSION_COOKIE_NAME, "", getSessionCookieOptions(0, sessionCookieSameSite)));
     res.json({ ok: true });
   });
 
