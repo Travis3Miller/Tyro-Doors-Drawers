@@ -269,6 +269,8 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   assert.equal(wixCallbackOrdersFailRes.status, 200);
   const wixCallbackOrdersFailBody = await wixCallbackOrdersFailRes.json();
   assert.equal(wixCallbackOrdersFailBody.user.name, "Orders API Down");
+  assert.equal(wixCallbackOrdersFailBody.user.plan, "free");
+  assert.equal(wixCallbackOrdersFailBody.user.subscriptionStatus, "inactive");
   wixMemberOrdersStatus = 200;
 
   const wixCallbackInvalidStateRes = await jsonRequest(baseUrl, "/api/auth/wix/callback?code=test-code&state=invalid");

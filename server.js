@@ -1100,25 +1100,25 @@ function createApp(options = {}) {
 
       let user = await userStore.upsertUserFromIdentity(identity);
       try {
-        const wixOrders = await getWixOrdersForCurrentMember(accessToken, wixFetch);
-        if (Array.isArray(wixOrders)) {
-          const matchingOrder = pickWixSubscriptionOrder(wixOrders);
-          const subscriptionStatus = matchingOrder
-            ? mapWixStatusToSubscriptionStatus(matchingOrder.status)
-            : "inactive";
-          const plan = paidPlanIds().size
-            ? (hasPaidWixAccess(wixOrders) ? "pro" : "free")
-            : user.plan;
-          const updatedUser = await userStore.updateUserBilling({
-            userId: user.id,
-            email: user.email,
-            externalMemberId: user.externalMemberId,
-            externalCustomerId: user.externalCustomerId,
-            plan,
-            subscriptionStatus
-          });
-          if (updatedUser) {
-            user = updatedUser;
+        if (paidPlanIds().size) {
+          const wixOrders = await getWixOrdersForCurrentMember(accessToken, wixFetch);
+          if (Array.isArray(wixOrders)) {
+            const matchingOrder = pickWixSubscriptionOrder(wixOrders);
+            const subscriptionStatus = matchingOrder
+              ? mapWixStatusToSubscriptionStatus(matchingOrder.status)
+              : "inactive";
+            const plan = hasPaidWixAccess(wixOrders) ? "pro" : "free";
+            const updatedUser = await userStore.updateUserBilling({
+              userId: user.id,
+              email: user.email,
+              externalMemberId: user.externalMemberId,
+              externalCustomerId: user.externalCustomerId,
+              plan,
+              subscriptionStatus
+            });
+            if (updatedUser) {
+              user = updatedUser;
+            }
           }
         }
       } catch (_err) {
