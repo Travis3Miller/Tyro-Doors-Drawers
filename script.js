@@ -600,7 +600,9 @@ async function refreshWelcomeBanner() {
     if (session && session.authenticated && session.user) {
       const rawName = String(session.user.name || "").trim();
       const firstName = rawName ? rawName.split(/\s+/)[0] : "";
-      const emailName = String(session.user.email || "").trim().split("@")[0];
+      const rawEmail = String(session.user.email || "").trim();
+      const atIndex = rawEmail.indexOf("@");
+      const emailName = atIndex > 0 ? rawEmail.slice(0, atIndex).trim() : "";
       const displayName = firstName || emailName || "there";
       banner.textContent = `Welcome, ${displayName}`;
     }
