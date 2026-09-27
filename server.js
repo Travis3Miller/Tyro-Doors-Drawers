@@ -338,7 +338,11 @@ async function getWixMemberFromToken(accessToken, fetchImpl = fetch) {
 function identityFromWixMember(member) {
   const source = member && typeof member === "object" ? member : {};
   const profile = source.profile && typeof source.profile === "object" ? source.profile : {};
-  const contact = source.contactDetails && typeof source.contactDetails === "object" ? source.contactDetails : {};
+  const contact = source.contact && typeof source.contact === "object"
+    ? source.contact
+    : source.contactDetails && typeof source.contactDetails === "object"
+      ? source.contactDetails
+      : {};
   const email = String(source.loginEmail || source.email || profile.email || "").trim().toLowerCase();
   const externalMemberId = String(source.id || source.memberId || "").trim();
   const fullName = [contact.firstName, contact.lastName]
