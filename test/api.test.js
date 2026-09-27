@@ -60,6 +60,19 @@ test("health/config, auth session, project isolation, and billing entitlement", 
       }
     }
   };
+  let wixMemberOrdersResponse = {
+    orders: [
+      {
+        id: "order-oauth",
+        status: "ACTIVE",
+        paymentStatus: "PAID",
+        planId: "PLAN-DOORS",
+        planName: "Doors and Drawers Cutlister"
+      }
+    ]
+  };
+  let wixMemberStatus = 200;
+  let wixMemberOrdersStatus = 200;
 
   const wixFetch = async (url) => {
     if (url === "https://www.wixapis.com/oauth2/token") {
@@ -74,8 +87,11 @@ test("health/config, auth session, project isolation, and billing entitlement", 
         expires_in: 300
       }), { status: 200, headers: { "content-type": "application/json" } });
     }
-    if (url === "https://www.wixapis.com/members/v1/members/me") {
-      return new Response(JSON.stringify(wixMemberResponse), { status: 200, headers: { "content-type": "application/json" } });
+    if (url === "https://www.wixapis.com/members/v1/members/my?fieldSet=FULL") {
+      return new Response(JSON.stringify(wixMemberResponse), { status: wixMemberStatus, headers: { "content-type": "application/json" } });
+    }
+    if (url === "https://www.wixapis.com/pricing-plans/v2/member/orders") {
+      return new Response(JSON.stringify(wixMemberOrdersResponse), { status: wixMemberOrdersStatus, headers: { "content-type": "application/json" } });
     }
     const parsed = new URL(url);
     const buyerId = parsed.searchParams.get("buyerIds");
@@ -86,7 +102,7 @@ test("health/config, auth session, project isolation, and billing entitlement", 
             id: "order-a",
             status: "ACTIVE",
             paymentStatus: "PAID",
-            planId: "plan-doors",
+            planId: "PLAN-DOORS",
             planName: "Doors and Drawers Cutlister"
           }
         ]
@@ -168,6 +184,9 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   assert.equal(wixCallbackBody.user.externalMemberId, "member-oauth");
   assert.equal(wixCallbackBody.user.email, "oauth-user@example.com");
   assert.equal(wixCallbackBody.user.name, "OAuth User");
+  assert.equal(wixCallbackBody.user.plan, "pro");
+  assert.equal(wixCallbackBody.user.subscriptionStatus, "active");
+  assert.equal(wixCallbackBody.plan, "pro");
   const wixCallbackReplayRes = await jsonRequest(baseUrl, `/api/auth/wix/callback?code=test-code&state=${encodeURIComponent(oauthState)}`);
   assert.equal(wixCallbackReplayRes.status, 400);
 
@@ -212,6 +231,96 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   assert.equal(wixCallbackContactObjectRes.status, 200);
   const wixCallbackContactObjectBody = await wixCallbackContactObjectRes.json();
   assert.equal(wixCallbackContactObjectBody.user.name, "Sandbox Member");
+
+  wixMemberResponse = {
+    member: {
+      id: "member-oauth-unconfigured-plan",
+      loginEmail: "oauth-unconfigured@example.com",
+      profile: { nickname: "Unconfigured Plan Member" }
+    }
+  };
+  wixMemberOrdersResponse = {
+    orders: [
+      {
+        id: "order-unconfigured-plan",
+        status: "ACTIVE",
+        paymentStatus: "PAID",
+        planId: "plan-windows",
+        planName: "Windows Cutlister"
+      }
+    ]
+  };
+  const wixLoginUnconfiguredPlanRes = await jsonRequest(baseUrl, "/api/auth/wix/login", {
+    redirect: "manual"
+  });
+  assert.equal(wixLoginUnconfiguredPlanRes.status, 302);
+  const unconfiguredPlanState = new URL(wixLoginUnconfiguredPlanRes.headers.get("location")).searchParams.get("state");
+  assert.ok(unconfiguredPlanState);
+  const wixCallbackUnconfiguredPlanRes = await jsonRequest(baseUrl, `/api/auth/wix/callback?code=test-code&state=${encodeURIComponent(unconfiguredPlanState)}`);
+  assert.equal(wixCallbackUnconfiguredPlanRes.status, 200);
+  const wixCallbackUnconfiguredPlanBody = await wixCallbackUnconfiguredPlanRes.json();
+  assert.equal(wixCallbackUnconfiguredPlanBody.user.plan, "free");
+  assert.equal(wixCallbackUnconfiguredPlanBody.user.subscriptionStatus, "inactive");
+
+  wixMemberResponse = {
+    member: {
+      id: "member-oauth-no-orders",
+      loginEmail: "oauth-no-orders@example.com",
+      profile: { nickname: "No Orders Member" }
+    }
+  };
+  wixMemberOrdersResponse = { orders: [] };
+  const wixLoginNoOrdersRes = await jsonRequest(baseUrl, "/api/auth/wix/login", {
+    redirect: "manual"
+  });
+  assert.equal(wixLoginNoOrdersRes.status, 302);
+  const noOrdersState = new URL(wixLoginNoOrdersRes.headers.get("location")).searchParams.get("state");
+  assert.ok(noOrdersState);
+  const wixCallbackNoOrdersRes = await jsonRequest(baseUrl, `/api/auth/wix/callback?code=test-code&state=${encodeURIComponent(noOrdersState)}`);
+  assert.equal(wixCallbackNoOrdersRes.status, 200);
+  const wixCallbackNoOrdersBody = await wixCallbackNoOrdersRes.json();
+  assert.equal(wixCallbackNoOrdersBody.user.plan, "free");
+  assert.equal(wixCallbackNoOrdersBody.user.subscriptionStatus, "inactive");
+
+  wixMemberResponse = {
+    member: {
+      id: "member-oauth-orders-fail",
+      loginEmail: "oauth-orders-fail@example.com",
+      profile: { nickname: "Orders API Down" }
+    }
+  };
+  wixMemberOrdersStatus = 503;
+  const wixLoginOrdersFailRes = await jsonRequest(baseUrl, "/api/auth/wix/login", {
+    redirect: "manual"
+  });
+  assert.equal(wixLoginOrdersFailRes.status, 302);
+  const ordersFailState = new URL(wixLoginOrdersFailRes.headers.get("location")).searchParams.get("state");
+  assert.ok(ordersFailState);
+  const wixCallbackOrdersFailRes = await jsonRequest(baseUrl, `/api/auth/wix/callback?code=test-code&state=${encodeURIComponent(ordersFailState)}`);
+  assert.equal(wixCallbackOrdersFailRes.status, 200);
+  const wixCallbackOrdersFailBody = await wixCallbackOrdersFailRes.json();
+  assert.equal(wixCallbackOrdersFailBody.user.name, "Orders API Down");
+  assert.equal(wixCallbackOrdersFailBody.user.plan, "free");
+  assert.equal(wixCallbackOrdersFailBody.user.subscriptionStatus, "inactive");
+  wixMemberOrdersStatus = 200;
+
+  wixMemberResponse = {
+    member: {
+      id: "member-oauth-member-fail",
+      loginEmail: "oauth-member-fail@example.com",
+      profile: { nickname: "Member API Down" }
+    }
+  };
+  wixMemberStatus = 503;
+  const wixLoginMemberFailRes = await jsonRequest(baseUrl, "/api/auth/wix/login", {
+    redirect: "manual"
+  });
+  assert.equal(wixLoginMemberFailRes.status, 302);
+  const memberFailState = new URL(wixLoginMemberFailRes.headers.get("location")).searchParams.get("state");
+  assert.ok(memberFailState);
+  const wixCallbackMemberFailRes = await jsonRequest(baseUrl, `/api/auth/wix/callback?code=test-code&state=${encodeURIComponent(memberFailState)}`);
+  assert.equal(wixCallbackMemberFailRes.status, 500);
+  wixMemberStatus = 200;
 
   const wixCallbackInvalidStateRes = await jsonRequest(baseUrl, "/api/auth/wix/callback?code=test-code&state=invalid");
   assert.equal(wixCallbackInvalidStateRes.status, 400);

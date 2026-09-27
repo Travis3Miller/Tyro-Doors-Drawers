@@ -42,7 +42,12 @@ Payload should include `email` and/or external identifiers plus `plan` and `subs
 
 ## Wix paywall checks
 
-When Wix OAuth client credentials are configured, the API verifies Wix Pricing Plan orders using:
+When Wix OAuth client credentials are configured, the OAuth callback uses the member access token to verify the current member with:
+
+- `GET https://www.wixapis.com/members/v1/members/my?fieldSet=FULL`
+- `GET https://www.wixapis.com/pricing-plans/v2/member/orders`
+
+When Wix OAuth client credentials are configured, save/customize entitlement checks also support server-side verification using:
 
 - `GET https://www.wixapis.com/pricing-plans/v2/orders`
 - `buyerIds=<externalMemberId>`
