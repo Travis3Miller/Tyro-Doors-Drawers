@@ -1099,24 +1099,28 @@ function createApp(options = {}) {
       }
 
       let user = await userStore.upsertUserFromIdentity(identity);
-      const wixOrders = await getWixOrdersForCurrentMember(accessToken, wixFetch);
-      if (Array.isArray(wixOrders)) {
-        const matchingOrder = pickWixSubscriptionOrder(wixOrders);
-        const subscriptionStatus = mapWixStatusToSubscriptionStatus(matchingOrder ? matchingOrder.status : "inactive");
-        const plan = paidPlanIds().size
-          ? (hasPaidWixAccess(wixOrders) ? "pro" : "free")
-          : user.plan;
-        const updatedUser = await userStore.updateUserBilling({
-          userId: user.id,
-          email: user.email,
-          externalMemberId: user.externalMemberId,
-          externalCustomerId: user.externalCustomerId,
-          plan,
-          subscriptionStatus
-        });
-        if (updatedUser) {
-          user = updatedUser;
+      try {
+        const wixOrders = await getWixOrdersForCurrentMember(accessToken, wixFetch);
+        if (Array.isArray(wixOrders)) {
+          const matchingOrder = pickWixSubscriptionOrder(wixOrders);
+          const subscriptionStatus = mapWixStatusToSubscriptionStatus(matchingOrder ? matchingOrder.status : "inactive");
+          const plan = paidPlanIds().size
+            ? (hasPaidWixAccess(wixOrders) ? "pro" : "free")
+            : user.plan;
+          const updatedUser = await userStore.updateUserBilling({
+            userId: user.id,
+            email: user.email,
+            externalMemberId: user.externalMemberId,
+            externalCustomerId: user.externalCustomerId,
+            plan,
+            subscriptionStatus
+          });
+          if (updatedUser) {
+            user = updatedUser;
+          }
         }
+      } catch (_err) {
+        // Continue OAuth login even if member order lookup is temporarily unavailable.
       }
       const token = createSessionToken(
         { userId: user.id, exp: Date.now() + SESSION_TTL_MS },

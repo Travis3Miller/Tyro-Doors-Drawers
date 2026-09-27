@@ -71,6 +71,7 @@ test("health/config, auth session, project isolation, and billing entitlement", 
       }
     ]
   };
+  let wixMemberOrdersStatus = 200;
 
   const wixFetch = async (url) => {
     if (url === "https://www.wixapis.com/oauth2/token") {
@@ -89,7 +90,7 @@ test("health/config, auth session, project isolation, and billing entitlement", 
       return new Response(JSON.stringify(wixMemberResponse), { status: 200, headers: { "content-type": "application/json" } });
     }
     if (url === "https://www.wixapis.com/pricing-plans/v2/member/orders") {
-      return new Response(JSON.stringify(wixMemberOrdersResponse), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify(wixMemberOrdersResponse), { status: wixMemberOrdersStatus, headers: { "content-type": "application/json" } });
     }
     const parsed = new URL(url);
     const buyerId = parsed.searchParams.get("buyerIds");
@@ -249,6 +250,26 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   const wixCallbackNoOrdersBody = await wixCallbackNoOrdersRes.json();
   assert.equal(wixCallbackNoOrdersBody.user.plan, "free");
   assert.equal(wixCallbackNoOrdersBody.user.subscriptionStatus, "inactive");
+
+  wixMemberResponse = {
+    member: {
+      id: "member-oauth-orders-fail",
+      loginEmail: "oauth-orders-fail@example.com",
+      profile: { nickname: "Orders API Down" }
+    }
+  };
+  wixMemberOrdersStatus = 503;
+  const wixLoginOrdersFailRes = await jsonRequest(baseUrl, "/api/auth/wix/login", {
+    redirect: "manual"
+  });
+  assert.equal(wixLoginOrdersFailRes.status, 302);
+  const ordersFailState = new URL(wixLoginOrdersFailRes.headers.get("location")).searchParams.get("state");
+  assert.ok(ordersFailState);
+  const wixCallbackOrdersFailRes = await jsonRequest(baseUrl, `/api/auth/wix/callback?code=test-code&state=${encodeURIComponent(ordersFailState)}`);
+  assert.equal(wixCallbackOrdersFailRes.status, 200);
+  const wixCallbackOrdersFailBody = await wixCallbackOrdersFailRes.json();
+  assert.equal(wixCallbackOrdersFailBody.user.name, "Orders API Down");
+  wixMemberOrdersStatus = 200;
 
   const wixCallbackInvalidStateRes = await jsonRequest(baseUrl, "/api/auth/wix/callback?code=test-code&state=invalid");
   assert.equal(wixCallbackInvalidStateRes.status, 400);
