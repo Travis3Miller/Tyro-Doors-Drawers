@@ -66,7 +66,7 @@ test("health/config, auth session, project isolation, and billing entitlement", 
         id: "order-oauth",
         status: "ACTIVE",
         paymentStatus: "PAID",
-        planId: "plan-doors",
+        planId: "PLAN-DOORS",
         planName: "Doors and Drawers Cutlister"
       }
     ]
@@ -102,7 +102,7 @@ test("health/config, auth session, project isolation, and billing entitlement", 
             id: "order-a",
             status: "ACTIVE",
             paymentStatus: "PAID",
-            planId: "plan-doors",
+            planId: "PLAN-DOORS",
             planName: "Doors and Drawers Cutlister"
           }
         ]

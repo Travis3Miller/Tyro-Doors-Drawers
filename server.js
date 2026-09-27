@@ -416,7 +416,11 @@ function parseCsvEnv(value) {
 }
 
 function paidPlanIds() {
-  return new Set(parseCsvEnv(process.env.WIX_PAID_PLAN_IDS));
+  return new Set(parseCsvEnv(process.env.WIX_PAID_PLAN_IDS).map(normalizePlanId).filter(Boolean));
+}
+
+function normalizePlanId(value) {
+  return String(value || "").trim().toUpperCase();
 }
 
 function normalizeOrderStatus(value) {
@@ -445,7 +449,7 @@ function hasPaidWixAccess(orders = []) {
     if (status !== "ACTIVE") {
       return false;
     }
-    return ids.has(String(order.planId || "").trim());
+    return ids.has(normalizePlanId(order.planId));
   });
 }
 
@@ -1116,7 +1120,7 @@ function createApp(options = {}) {
           const wixOrders = await getWixOrdersForCurrentMember(accessToken, wixFetch);
           if (Array.isArray(wixOrders)) {
             const configuredPaidPlanIds = paidPlanIds();
-            const scopedOrders = wixOrders.filter((order) => configuredPaidPlanIds.has(String(order.planId || "").trim()));
+            const scopedOrders = wixOrders.filter((order) => configuredPaidPlanIds.has(normalizePlanId(order.planId)));
             const matchingOrder = pickWixSubscriptionOrder(scopedOrders);
             const subscriptionStatus = matchingOrder
               ? mapWixStatusToSubscriptionStatus(matchingOrder.status)
