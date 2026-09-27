@@ -1100,7 +1100,7 @@ function createApp(options = {}) {
 
       let user = await userStore.upsertUserFromIdentity(identity);
       const wixOrders = await getWixOrdersForCurrentMember(accessToken, wixFetch);
-      if (Array.isArray(wixOrders) && wixOrders.length) {
+      if (Array.isArray(wixOrders)) {
         const matchingOrder = pickWixSubscriptionOrder(wixOrders);
         const subscriptionStatus = mapWixStatusToSubscriptionStatus(matchingOrder ? matchingOrder.status : "inactive");
         const plan = paidPlanIds().size
