@@ -23,6 +23,7 @@ This project is configured for:
    - optional `DATA_RETENTION_MONTHS` (default 13)
 5. `SESSION_SECRET` is generated automatically when you deploy from `render.yaml`; if it is missing, the server derives a stable fallback from another configured backend secret so the app can still boot, but you should still set `SESSION_SECRET` explicitly for a dedicated session-signing key.
 6. `DATABASE_URL` is automatically wired from Render Postgres.
+7. Session cookies default to `SameSite=None` in production (`Lax` outside production). Override with `SESSION_COOKIE_SAME_SITE` only if your embedding/auth flow needs a different setting.
 
 ## 2. Configure trusted identity exchange
 

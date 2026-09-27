@@ -76,6 +76,7 @@ Optional:
 - `WIX_OAUTH_SCOPE`
 - `DATA_RETENTION_MONTHS` (default `13`)
 - `CORS_ORIGINS`
+- `SESSION_COOKIE_SAME_SITE` (`None`, `Lax`, or `Strict`; defaults to `None` in production and `Lax` otherwise)
 - `ALLOW_GITHUB_PAGES` (default `true`)
 - `SERVE_STATIC` (default `true`)
 - `USER_STORE_FILE` and `LEGACY_STORE_FILE` for local/test file overrides
