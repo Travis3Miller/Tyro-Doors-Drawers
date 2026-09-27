@@ -582,27 +582,27 @@ async function loadCatalog() {
     state.projects = localProjects();
     state.settings = localSettings();
   }
+}
 
-  async function refreshWelcomeBanner() {
-    const banner = byId("welcomeBanner");
-    if (!banner) {
-      return;
+async function refreshWelcomeBanner() {
+  const banner = byId("welcomeBanner");
+  if (!banner) {
+    return;
+  }
+  banner.textContent = "Welcome";
+
+  if (await ensureDataMode() !== "api") {
+    return;
+  }
+
+  try {
+    const session = await apiJson("/api/auth/session");
+    if (session && session.authenticated && session.user) {
+      const displayName = session.user.name || session.user.email || "there";
+      banner.textContent = `Welcome, ${displayName}`;
     }
+  } catch (_err) {
     banner.textContent = "Welcome";
-
-    if (await ensureDataMode() !== "api") {
-      return;
-    }
-
-    try {
-      const session = await apiJson("/api/auth/session");
-      if (session && session.authenticated && session.user) {
-        const displayName = session.user.name || session.user.email || "there";
-        banner.textContent = `Welcome, ${displayName}`;
-      }
-    } catch (_err) {
-      banner.textContent = "Welcome";
-    }
   }
 }
 

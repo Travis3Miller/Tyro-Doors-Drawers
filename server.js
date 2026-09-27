@@ -14,6 +14,7 @@ const SERVE_STATIC = process.env.SERVE_STATIC !== "false";
 const SESSION_COOKIE_NAME = "cabinet_session";
 const OAUTH_STATE_TTL_MS = 1000 * 60 * 10;
 const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 24 * 30);
+const VALID_SAME_SITE_VALUES = new Set(["strict", "lax", "none"]);
 const PRO_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "paid", "pending"]);
 const DENIED_ORDER_STATUSES = new Set(["CANCELED", "ENDED", "PAUSED", "REFUNDED", "FAILED"]);
 const RETENTION_MONTHS = Number(process.env.DATA_RETENTION_MONTHS || 13);
@@ -114,6 +115,17 @@ function serializeCookie(name, value, options = {}) {
     parts.push(`Max-Age=${Math.max(0, Math.floor(options.maxAge))}`);
   }
   return parts.join("; ");
+}
+
+function resolveSessionCookieSameSite() {
+  const configured = String(process.env.SESSION_COOKIE_SAME_SITE || "").trim().toLowerCase();
+  if (configured) {
+    if (!VALID_SAME_SITE_VALUES.has(configured)) {
+      throw new Error("SESSION_COOKIE_SAME_SITE must be one of None, Lax, or Strict.");
+    }
+    return configured[0].toUpperCase() + configured.slice(1);
+  }
+  return process.env.NODE_ENV === "production" ? "None" : "Lax";
 }
 
 function getSessionSecret() {
@@ -793,6 +805,8 @@ function attachRawBody(req, _res, buffer) {
 function createApp(options = {}) {
   const app = express();
   const { secret: sessionSecret, mode: sessionSecretMode } = getSessionSecret();
+  const sessionCookieSameSite = resolveSessionCookieSameSite();
+  const sessionCookieSecure = process.env.NODE_ENV === "production" || sessionCookieSameSite === "None";
   if (sessionSecretMode === "ephemeral") {
     console.warn("SESSION_SECRET is not set. Using an ephemeral in-memory secret; sessions will be reset on restart.");
   } else if (sessionSecretMode.startsWith("derived:")) {
@@ -1019,8 +1033,8 @@ function createApp(options = {}) {
       res.setHeader("Set-Cookie", serializeCookie(SESSION_COOKIE_NAME, token, {
         path: "/",
         httpOnly: true,
-        sameSite: "Lax",
-        secure: process.env.NODE_ENV === "production",
+        sameSite: sessionCookieSameSite,
+        secure: sessionCookieSecure,
         maxAge: Math.floor(SESSION_TTL_MS / 1000)
       }));
       res.json({
@@ -1055,8 +1069,8 @@ function createApp(options = {}) {
       res.setHeader("Set-Cookie", serializeCookie(SESSION_COOKIE_NAME, token, {
         path: "/",
         httpOnly: true,
-        sameSite: "Lax",
-        secure: process.env.NODE_ENV === "production",
+        sameSite: sessionCookieSameSite,
+        secure: sessionCookieSecure,
         maxAge: Math.floor(SESSION_TTL_MS / 1000)
       }));
 
@@ -1078,8 +1092,8 @@ function createApp(options = {}) {
     res.setHeader("Set-Cookie", serializeCookie(SESSION_COOKIE_NAME, "", {
       path: "/",
       httpOnly: true,
-      sameSite: "Lax",
-      secure: process.env.NODE_ENV === "production",
+      sameSite: sessionCookieSameSite,
+      secure: sessionCookieSecure,
       maxAge: 0
     }));
     res.json({ ok: true });

@@ -20,8 +20,10 @@ This project is configured for:
    - `WIX_PAID_PLAN_IDS` (recommended)
    - `WIX_UPGRADE_URL`
    - optional `WIX_OAUTH_SCOPE`
+   - optional `SESSION_COOKIE_SAME_SITE` (`None`, `Lax`, `Strict`)
    - optional `DATA_RETENTION_MONTHS` (default 13)
 5. `SESSION_SECRET` is generated automatically when you deploy from `render.yaml`; if it is missing, the server derives a stable fallback from another configured backend secret so the app can still boot, but you should still set `SESSION_SECRET` explicitly for a dedicated session-signing key.
+   Production cookies default to `SameSite=None` so browser sessions can persist between a separately hosted frontend and Render API.
 6. `DATABASE_URL` is automatically wired from Render Postgres.
 
 ## 2. Configure trusted identity exchange

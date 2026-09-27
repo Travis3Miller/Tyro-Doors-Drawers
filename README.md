@@ -74,6 +74,7 @@ Optional:
 
 - `WIX_PAID_PLAN_IDS` (recommended, comma-separated Wix plan IDs)
 - `WIX_OAUTH_SCOPE`
+- `SESSION_COOKIE_SAME_SITE` (`None`, `Lax`, or `Strict`; defaults to `None` in production and `Lax` otherwise)
 - `DATA_RETENTION_MONTHS` (default `13`)
 - `CORS_ORIGINS`
 - `ALLOW_GITHUB_PAGES` (default `true`)
