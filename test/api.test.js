@@ -233,6 +233,36 @@ test("health/config, auth session, project isolation, and billing entitlement", 
 
   wixMemberResponse = {
     member: {
+      id: "member-oauth-unconfigured-plan",
+      loginEmail: "oauth-unconfigured@example.com",
+      profile: { nickname: "Unconfigured Plan Member" }
+    }
+  };
+  wixMemberOrdersResponse = {
+    orders: [
+      {
+        id: "order-unconfigured-plan",
+        status: "ACTIVE",
+        paymentStatus: "PAID",
+        planId: "plan-windows",
+        planName: "Windows Cutlister"
+      }
+    ]
+  };
+  const wixLoginUnconfiguredPlanRes = await jsonRequest(baseUrl, "/api/auth/wix/login", {
+    redirect: "manual"
+  });
+  assert.equal(wixLoginUnconfiguredPlanRes.status, 302);
+  const unconfiguredPlanState = new URL(wixLoginUnconfiguredPlanRes.headers.get("location")).searchParams.get("state");
+  assert.ok(unconfiguredPlanState);
+  const wixCallbackUnconfiguredPlanRes = await jsonRequest(baseUrl, `/api/auth/wix/callback?code=test-code&state=${encodeURIComponent(unconfiguredPlanState)}`);
+  assert.equal(wixCallbackUnconfiguredPlanRes.status, 200);
+  const wixCallbackUnconfiguredPlanBody = await wixCallbackUnconfiguredPlanRes.json();
+  assert.equal(wixCallbackUnconfiguredPlanBody.user.plan, "free");
+  assert.equal(wixCallbackUnconfiguredPlanBody.user.subscriptionStatus, "inactive");
+
+  wixMemberResponse = {
+    member: {
       id: "member-oauth-no-orders",
       loginEmail: "oauth-no-orders@example.com",
       profile: { nickname: "No Orders Member" }
