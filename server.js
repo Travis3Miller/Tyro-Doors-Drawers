@@ -144,6 +144,11 @@ function getSessionCookieOptions(maxAge, sameSite = getSessionCookieSameSite()) 
   };
 }
 
+function getSessionCookieClearHeaders(sameSite = getSessionCookieSameSite()) {
+  return Array.from(new Set([sameSite, "Lax", "None", "Strict"]))
+    .map((policy) => serializeCookie(SESSION_COOKIE_NAME, "", getSessionCookieOptions(0, policy)));
+}
+
 function getSessionSecret() {
   const secret = process.env.SESSION_SECRET || "";
   if (secret) {
@@ -1111,7 +1116,7 @@ function createApp(options = {}) {
   });
 
   app.post("/api/auth/logout", (_req, res) => {
-    res.setHeader("Set-Cookie", serializeCookie(SESSION_COOKIE_NAME, "", getSessionCookieOptions(0, sessionCookieSameSite)));
+    res.setHeader("Set-Cookie", getSessionCookieClearHeaders(sessionCookieSameSite));
     res.json({ ok: true });
   });
 

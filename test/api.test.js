@@ -621,6 +621,13 @@ test("production cookies default to SameSite=None and allow SameSite override", 
   const defaultCookie = defaultCookieRes.headers.get("set-cookie");
   assert.ok(defaultCookie && defaultCookie.includes("SameSite=None"));
   assert.ok(defaultCookie.includes("Secure"));
+  const logoutRes = await jsonRequest(baseUrl, "/api/auth/logout", { method: "POST" });
+  assert.equal(logoutRes.status, 200);
+  const clearedCookies = logoutRes.headers.getSetCookie
+    ? logoutRes.headers.getSetCookie()
+    : [logoutRes.headers.get("set-cookie")].filter(Boolean);
+  assert.ok(clearedCookies.some((cookie) => cookie.includes("SameSite=None")));
+  assert.ok(clearedCookies.some((cookie) => cookie.includes("SameSite=Lax")));
 
   process.env.SESSION_COOKIE_SAME_SITE = "Strict";
   ({ startServer } = loadServerModule());
