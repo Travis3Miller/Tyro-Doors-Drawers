@@ -1115,11 +1115,13 @@ function createApp(options = {}) {
         } else {
           const wixOrders = await getWixOrdersForCurrentMember(accessToken, wixFetch);
           if (Array.isArray(wixOrders)) {
-            const matchingOrder = pickWixSubscriptionOrder(wixOrders);
+            const configuredPaidPlanIds = paidPlanIds();
+            const scopedOrders = wixOrders.filter((order) => configuredPaidPlanIds.has(String(order.planId || "").trim()));
+            const matchingOrder = pickWixSubscriptionOrder(scopedOrders);
             const subscriptionStatus = matchingOrder
               ? mapWixStatusToSubscriptionStatus(matchingOrder.status)
               : "inactive";
-            const plan = hasPaidWixAccess(wixOrders) ? "pro" : "free";
+            const plan = hasPaidWixAccess(scopedOrders) ? "pro" : "free";
             const updatedUser = await userStore.updateUserBilling({
               userId: user.id,
               email: user.email,
