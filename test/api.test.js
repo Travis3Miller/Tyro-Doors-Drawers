@@ -192,6 +192,27 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   const wixCallbackContactNameBody = await wixCallbackContactNameRes.json();
   assert.equal(wixCallbackContactNameBody.user.name, "OAuth Contact");
 
+  wixMemberResponse = {
+    member: {
+      id: "member-oauth-contact-object",
+      loginEmail: "oauth-contact-object@example.com",
+      contact: {
+        firstName: "Sandbox",
+        lastName: "Member"
+      }
+    }
+  };
+  const wixLoginContactObjectRes = await jsonRequest(baseUrl, "/api/auth/wix/login", {
+    redirect: "manual"
+  });
+  assert.equal(wixLoginContactObjectRes.status, 302);
+  const contactObjectState = new URL(wixLoginContactObjectRes.headers.get("location")).searchParams.get("state");
+  assert.ok(contactObjectState);
+  const wixCallbackContactObjectRes = await jsonRequest(baseUrl, `/api/auth/wix/callback?code=test-code&state=${encodeURIComponent(contactObjectState)}`);
+  assert.equal(wixCallbackContactObjectRes.status, 200);
+  const wixCallbackContactObjectBody = await wixCallbackContactObjectRes.json();
+  assert.equal(wixCallbackContactObjectBody.user.name, "Sandbox Member");
+
   const wixCallbackInvalidStateRes = await jsonRequest(baseUrl, "/api/auth/wix/callback?code=test-code&state=invalid");
   assert.equal(wixCallbackInvalidStateRes.status, 400);
 
