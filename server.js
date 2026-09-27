@@ -1103,7 +1103,9 @@ function createApp(options = {}) {
         const wixOrders = await getWixOrdersForCurrentMember(accessToken, wixFetch);
         if (Array.isArray(wixOrders)) {
           const matchingOrder = pickWixSubscriptionOrder(wixOrders);
-          const subscriptionStatus = mapWixStatusToSubscriptionStatus(matchingOrder ? matchingOrder.status : "inactive");
+          const subscriptionStatus = matchingOrder
+            ? mapWixStatusToSubscriptionStatus(matchingOrder.status)
+            : "inactive";
           const plan = paidPlanIds().size
             ? (hasPaidWixAccess(wixOrders) ? "pro" : "free")
             : user.plan;
