@@ -1103,7 +1103,8 @@ function createApp(options = {}) {
       }
 
       let user = await userStore.upsertUserFromIdentity(identity);
-      if (!paidPlanIds().size) {
+      const configuredPaidPlanIds = paidPlanIds();
+      if (!configuredPaidPlanIds.size) {
         const updatedUser = await userStore.updateUserBilling({
           userId: user.id,
           email: user.email,
@@ -1123,7 +1124,6 @@ function createApp(options = {}) {
           // Continue OAuth login even if member order lookup is temporarily unavailable.
         }
         if (Array.isArray(wixOrders)) {
-          const configuredPaidPlanIds = paidPlanIds();
           const scopedOrders = wixOrders.filter((order) => configuredPaidPlanIds.has(normalizePlanId(order.planId)));
           const matchingOrder = pickWixSubscriptionOrder(scopedOrders);
           const subscriptionStatus = matchingOrder
