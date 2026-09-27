@@ -116,6 +116,39 @@ function serializeCookie(name, value, options = {}) {
   return parts.join("; ");
 }
 
+function getSessionCookieSameSite() {
+  const configured = String(process.env.SESSION_COOKIE_SAME_SITE || "").trim();
+  if (!configured) {
+    return process.env.NODE_ENV === "production" ? "None" : "Lax";
+  }
+  const normalized = configured.toLowerCase();
+  if (normalized === "none") {
+    return "None";
+  }
+  if (normalized === "lax") {
+    return "Lax";
+  }
+  if (normalized === "strict") {
+    return "Strict";
+  }
+  throw new Error("SESSION_COOKIE_SAME_SITE must be one of None, Lax, or Strict.");
+}
+
+function getSessionCookieOptions(maxAge, sameSite = getSessionCookieSameSite()) {
+  return {
+    path: "/",
+    httpOnly: true,
+    sameSite,
+    secure: process.env.NODE_ENV === "production" || sameSite === "None",
+    maxAge
+  };
+}
+
+function getSessionCookieClearHeaders(sameSite = getSessionCookieSameSite()) {
+  return Array.from(new Set([sameSite, "Lax", "None", "Strict"]))
+    .map((policy) => serializeCookie(SESSION_COOKIE_NAME, "", getSessionCookieOptions(0, policy)));
+}
+
 function getSessionSecret() {
   const secret = process.env.SESSION_SECRET || "";
   if (secret) {
@@ -811,6 +844,7 @@ function createApp(options = {}) {
   } else if (sessionSecretMode.startsWith("derived:")) {
     console.warn(`SESSION_SECRET is not set. Deriving the session signing secret from ${sessionSecretMode.slice(8)}; set SESSION_SECRET for an explicit persistent secret.`);
   }
+  const sessionCookieSameSite = getSessionCookieSameSite();
   const wixFetch = options.wixFetch || fetch;
   const wixClientTokenCache = { accessToken: "", expiresAt: 0 };
   const wixOauthStates = new Map();
@@ -1029,13 +1063,10 @@ function createApp(options = {}) {
         { userId: user.id, exp: Date.now() + SESSION_TTL_MS },
         sessionSecret
       );
-      res.setHeader("Set-Cookie", serializeCookie(SESSION_COOKIE_NAME, token, {
-        path: "/",
-        httpOnly: true,
-        sameSite: "Lax",
-        secure: process.env.NODE_ENV === "production",
-        maxAge: Math.floor(SESSION_TTL_MS / 1000)
-      }));
+      res.setHeader(
+        "Set-Cookie",
+        serializeCookie(SESSION_COOKIE_NAME, token, getSessionCookieOptions(Math.floor(SESSION_TTL_MS / 1000), sessionCookieSameSite))
+      );
       res.json({
         authenticated: true,
         user: userSummary(user),
@@ -1065,13 +1096,10 @@ function createApp(options = {}) {
         { userId: user.id, exp: Date.now() + SESSION_TTL_MS },
         sessionSecret
       );
-      res.setHeader("Set-Cookie", serializeCookie(SESSION_COOKIE_NAME, token, {
-        path: "/",
-        httpOnly: true,
-        sameSite: "Lax",
-        secure: process.env.NODE_ENV === "production",
-        maxAge: Math.floor(SESSION_TTL_MS / 1000)
-      }));
+      res.setHeader(
+        "Set-Cookie",
+        serializeCookie(SESSION_COOKIE_NAME, token, getSessionCookieOptions(Math.floor(SESSION_TTL_MS / 1000), sessionCookieSameSite))
+      );
 
       res.json({
         authenticated: true,
@@ -1088,13 +1116,7 @@ function createApp(options = {}) {
   });
 
   app.post("/api/auth/logout", (_req, res) => {
-    res.setHeader("Set-Cookie", serializeCookie(SESSION_COOKIE_NAME, "", {
-      path: "/",
-      httpOnly: true,
-      sameSite: "Lax",
-      secure: process.env.NODE_ENV === "production",
-      maxAge: 0
-    }));
+    res.setHeader("Set-Cookie", getSessionCookieClearHeaders(sessionCookieSameSite));
     res.json({ ok: true });
   });
 

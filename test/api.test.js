@@ -14,6 +14,7 @@ const originalEnv = {
   WIX_CLIENT_SECRET: process.env.WIX_CLIENT_SECRET,
   WIX_OAUTH_REDIRECT_URI: process.env.WIX_OAUTH_REDIRECT_URI,
   WIX_PAID_PLAN_IDS: process.env.WIX_PAID_PLAN_IDS,
+  SESSION_COOKIE_SAME_SITE: process.env.SESSION_COOKIE_SAME_SITE,
   USER_STORE_FILE: process.env.USER_STORE_FILE,
   LEGACY_STORE_FILE: process.env.LEGACY_STORE_FILE,
   WIX_UPGRADE_URL: process.env.WIX_UPGRADE_URL,
@@ -119,6 +120,7 @@ test("health/config, auth session, project isolation, and billing entitlement", 
     if (originalEnv.WIX_CLIENT_SECRET === undefined) delete process.env.WIX_CLIENT_SECRET; else process.env.WIX_CLIENT_SECRET = originalEnv.WIX_CLIENT_SECRET;
     if (originalEnv.WIX_OAUTH_REDIRECT_URI === undefined) delete process.env.WIX_OAUTH_REDIRECT_URI; else process.env.WIX_OAUTH_REDIRECT_URI = originalEnv.WIX_OAUTH_REDIRECT_URI;
     if (originalEnv.WIX_PAID_PLAN_IDS === undefined) delete process.env.WIX_PAID_PLAN_IDS; else process.env.WIX_PAID_PLAN_IDS = originalEnv.WIX_PAID_PLAN_IDS;
+    if (originalEnv.SESSION_COOKIE_SAME_SITE === undefined) delete process.env.SESSION_COOKIE_SAME_SITE; else process.env.SESSION_COOKIE_SAME_SITE = originalEnv.SESSION_COOKIE_SAME_SITE;
     if (originalEnv.USER_STORE_FILE === undefined) delete process.env.USER_STORE_FILE; else process.env.USER_STORE_FILE = originalEnv.USER_STORE_FILE;
     if (originalEnv.LEGACY_STORE_FILE === undefined) delete process.env.LEGACY_STORE_FILE; else process.env.LEGACY_STORE_FILE = originalEnv.LEGACY_STORE_FILE;
     if (originalEnv.WIX_UPGRADE_URL === undefined) delete process.env.WIX_UPGRADE_URL; else process.env.WIX_UPGRADE_URL = originalEnv.WIX_UPGRADE_URL;
@@ -159,6 +161,8 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   assert.equal(wixCallbackRes.status, 200);
   const oauthSessionCookie = wixCallbackRes.headers.get("set-cookie");
   assert.ok(oauthSessionCookie && oauthSessionCookie.includes("cabinet_session="));
+  assert.ok(oauthSessionCookie.includes("SameSite=Lax"));
+  assert.ok(!oauthSessionCookie.includes("Secure"));
   const wixCallbackBody = await wixCallbackRes.json();
   assert.equal(wixCallbackBody.authenticated, true);
   assert.equal(wixCallbackBody.user.externalMemberId, "member-oauth");
@@ -239,6 +243,8 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   assert.equal(ssoARes.status, 200);
   const sessionCookieA = ssoARes.headers.get("set-cookie");
   assert.ok(sessionCookieA && sessionCookieA.includes("cabinet_session="));
+  assert.ok(sessionCookieA.includes("SameSite=Lax"));
+  assert.ok(!sessionCookieA.includes("Secure"));
 
   const sessionRes = await jsonRequest(baseUrl, "/api/auth/session", {
     headers: { cookie: sessionCookieA }
@@ -484,6 +490,7 @@ test("server boots without SESSION_SECRET and keeps sessions valid across restar
     if (originalEnv.WIX_CLIENT_SECRET === undefined) delete process.env.WIX_CLIENT_SECRET; else process.env.WIX_CLIENT_SECRET = originalEnv.WIX_CLIENT_SECRET;
     if (originalEnv.WIX_OAUTH_REDIRECT_URI === undefined) delete process.env.WIX_OAUTH_REDIRECT_URI; else process.env.WIX_OAUTH_REDIRECT_URI = originalEnv.WIX_OAUTH_REDIRECT_URI;
     if (originalEnv.WIX_PAID_PLAN_IDS === undefined) delete process.env.WIX_PAID_PLAN_IDS; else process.env.WIX_PAID_PLAN_IDS = originalEnv.WIX_PAID_PLAN_IDS;
+    if (originalEnv.SESSION_COOKIE_SAME_SITE === undefined) delete process.env.SESSION_COOKIE_SAME_SITE; else process.env.SESSION_COOKIE_SAME_SITE = originalEnv.SESSION_COOKIE_SAME_SITE;
     if (originalEnv.USER_STORE_FILE === undefined) delete process.env.USER_STORE_FILE; else process.env.USER_STORE_FILE = originalEnv.USER_STORE_FILE;
     if (originalEnv.LEGACY_STORE_FILE === undefined) delete process.env.LEGACY_STORE_FILE; else process.env.LEGACY_STORE_FILE = originalEnv.LEGACY_STORE_FILE;
     if (originalEnv.WIX_UPGRADE_URL === undefined) delete process.env.WIX_UPGRADE_URL; else process.env.WIX_UPGRADE_URL = originalEnv.WIX_UPGRADE_URL;
@@ -554,4 +561,94 @@ test("server boots without SESSION_SECRET and keeps sessions valid across restar
   assert.equal(isolatedSessionRes.status, 200);
   const isolatedSessionBody = await isolatedSessionRes.json();
   assert.equal(isolatedSessionBody.authenticated, false);
+});
+
+test("production cookies default to SameSite=None and allow SameSite override", async (t) => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "tyro-dd-cookie-"));
+  const userStoreFile = path.join(tempDir, "user-store.json");
+  const legacyStoreFile = path.join(tempDir, "legacy-store.json");
+  let strictServer = null;
+
+  process.env.NODE_ENV = "production";
+  process.env.SESSION_SECRET = "prod-session-secret";
+  process.env.IDENTITY_SHARED_SECRET = "identity-secret";
+  process.env.USER_STORE_FILE = userStoreFile;
+  process.env.LEGACY_STORE_FILE = legacyStoreFile;
+  delete process.env.SESSION_COOKIE_SAME_SITE;
+
+  let { startServer, createApp } = loadServerModule();
+  const { server } = await startServer({ port: 0 });
+
+  t.after(async () => {
+    if (server.listening) {
+      await new Promise((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      });
+    }
+    if (strictServer && strictServer.listening) {
+      await new Promise((resolve, reject) => {
+        strictServer.close((err) => (err ? reject(err) : resolve()));
+      });
+    }
+    if (originalEnv.NODE_ENV === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = originalEnv.NODE_ENV;
+    if (originalEnv.SESSION_SECRET === undefined) delete process.env.SESSION_SECRET; else process.env.SESSION_SECRET = originalEnv.SESSION_SECRET;
+    if (originalEnv.IDENTITY_SHARED_SECRET === undefined) delete process.env.IDENTITY_SHARED_SECRET; else process.env.IDENTITY_SHARED_SECRET = originalEnv.IDENTITY_SHARED_SECRET;
+    if (originalEnv.SESSION_COOKIE_SAME_SITE === undefined) delete process.env.SESSION_COOKIE_SAME_SITE; else process.env.SESSION_COOKIE_SAME_SITE = originalEnv.SESSION_COOKIE_SAME_SITE;
+    if (originalEnv.USER_STORE_FILE === undefined) delete process.env.USER_STORE_FILE; else process.env.USER_STORE_FILE = originalEnv.USER_STORE_FILE;
+    if (originalEnv.LEGACY_STORE_FILE === undefined) delete process.env.LEGACY_STORE_FILE; else process.env.LEGACY_STORE_FILE = originalEnv.LEGACY_STORE_FILE;
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const userIdentity = JSON.stringify({
+    email: "cookie@example.com",
+    name: "Cookie User",
+    externalMemberId: "cookie-member"
+  });
+  const timestamp = String(Date.now());
+  const signature = signIdentity(process.env.IDENTITY_SHARED_SECRET, timestamp, userIdentity);
+
+  const defaultCookieRes = await jsonRequest(baseUrl, "/api/auth/sso", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-identity-timestamp": timestamp,
+      "x-identity-signature": signature
+    },
+    body: userIdentity
+  });
+  assert.equal(defaultCookieRes.status, 200);
+  const defaultCookie = defaultCookieRes.headers.get("set-cookie");
+  assert.ok(defaultCookie && defaultCookie.includes("SameSite=None"));
+  assert.ok(defaultCookie.includes("Secure"));
+  const logoutRes = await jsonRequest(baseUrl, "/api/auth/logout", { method: "POST" });
+  assert.equal(logoutRes.status, 200);
+  const clearedCookies = logoutRes.headers.getSetCookie
+    ? logoutRes.headers.getSetCookie()
+    : [logoutRes.headers.get("set-cookie")].filter(Boolean);
+  assert.ok(clearedCookies.some((cookie) => cookie.includes("SameSite=None")));
+  assert.ok(clearedCookies.some((cookie) => cookie.includes("SameSite=Lax")));
+
+  process.env.SESSION_COOKIE_SAME_SITE = "Strict";
+  ({ startServer } = loadServerModule());
+  ({ server: strictServer } = await startServer({ port: 0 }));
+  const strictBaseUrl = `http://127.0.0.1:${strictServer.address().port}`;
+  const strictTimestamp = String(Date.now());
+  const strictSignature = signIdentity(process.env.IDENTITY_SHARED_SECRET, strictTimestamp, userIdentity);
+  const strictCookieRes = await jsonRequest(strictBaseUrl, "/api/auth/sso", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-identity-timestamp": strictTimestamp,
+      "x-identity-signature": strictSignature
+    },
+    body: userIdentity
+  });
+  const strictCookie = strictCookieRes.headers.get("set-cookie");
+  assert.ok(strictCookie && strictCookie.includes("SameSite=Strict"));
+  assert.ok(strictCookie.includes("Secure"));
+
+  process.env.SESSION_COOKIE_SAME_SITE = "invalid";
+  ({ createApp } = loadServerModule());
+  assert.throws(() => createApp(), /SESSION_COOKIE_SAME_SITE must be one of None, Lax, or Strict/i);
 });
