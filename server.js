@@ -1100,7 +1100,19 @@ function createApp(options = {}) {
 
       let user = await userStore.upsertUserFromIdentity(identity);
       try {
-        if (paidPlanIds().size) {
+        if (!paidPlanIds().size) {
+          const updatedUser = await userStore.updateUserBilling({
+            userId: user.id,
+            email: user.email,
+            externalMemberId: user.externalMemberId,
+            externalCustomerId: user.externalCustomerId,
+            plan: "free",
+            subscriptionStatus: "inactive"
+          });
+          if (updatedUser) {
+            user = updatedUser;
+          }
+        } else {
           const wixOrders = await getWixOrdersForCurrentMember(accessToken, wixFetch);
           if (Array.isArray(wixOrders)) {
             const matchingOrder = pickWixSubscriptionOrder(wixOrders);
