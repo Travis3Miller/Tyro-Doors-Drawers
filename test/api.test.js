@@ -163,8 +163,30 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   assert.equal(wixCallbackBody.authenticated, true);
   assert.equal(wixCallbackBody.user.externalMemberId, "member-oauth");
   assert.equal(wixCallbackBody.user.email, "oauth-user@example.com");
+  assert.equal(wixCallbackBody.user.name, "OAuth User");
   const wixCallbackReplayRes = await jsonRequest(baseUrl, `/api/auth/wix/callback?code=test-code&state=${encodeURIComponent(oauthState)}`);
   assert.equal(wixCallbackReplayRes.status, 400);
+
+  wixMemberResponse = {
+    member: {
+      id: "member-oauth-contact",
+      loginEmail: "oauth-contact@example.com",
+      contactDetails: {
+        firstName: "OAuth",
+        lastName: "Contact"
+      }
+    }
+  };
+  const wixLoginContactNameRes = await jsonRequest(baseUrl, "/api/auth/wix/login", {
+    redirect: "manual"
+  });
+  assert.equal(wixLoginContactNameRes.status, 302);
+  const contactNameState = new URL(wixLoginContactNameRes.headers.get("location")).searchParams.get("state");
+  assert.ok(contactNameState);
+  const wixCallbackContactNameRes = await jsonRequest(baseUrl, `/api/auth/wix/callback?code=test-code&state=${encodeURIComponent(contactNameState)}`);
+  assert.equal(wixCallbackContactNameRes.status, 200);
+  const wixCallbackContactNameBody = await wixCallbackContactNameRes.json();
+  assert.equal(wixCallbackContactNameBody.user.name, "OAuth Contact");
 
   const wixCallbackInvalidStateRes = await jsonRequest(baseUrl, "/api/auth/wix/callback?code=test-code&state=invalid");
   assert.equal(wixCallbackInvalidStateRes.status, 400);

@@ -305,9 +305,22 @@ async function getWixMemberFromToken(accessToken, fetchImpl = fetch) {
 function identityFromWixMember(member) {
   const source = member && typeof member === "object" ? member : {};
   const profile = source.profile && typeof source.profile === "object" ? source.profile : {};
+  const contact = source.contactDetails && typeof source.contactDetails === "object" ? source.contactDetails : {};
   const email = String(source.loginEmail || source.email || profile.email || "").trim().toLowerCase();
   const externalMemberId = String(source.id || source.memberId || "").trim();
-  const name = String(profile.nickname || profile.displayName || source.name || "").trim();
+  const fullName = [contact.firstName, contact.lastName]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .join(" ");
+  const name = String(
+    profile.nickname
+      || profile.displayName
+      || profile.name
+      || source.displayName
+      || source.name
+      || fullName
+      || ""
+  ).trim();
   return { email, name, externalMemberId };
 }
 
