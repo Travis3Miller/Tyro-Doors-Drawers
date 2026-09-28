@@ -13,6 +13,7 @@ const originalEnv = {
   WIX_CLIENT_ID: process.env.WIX_CLIENT_ID,
   WIX_CLIENT_SECRET: process.env.WIX_CLIENT_SECRET,
   WIX_OAUTH_REDIRECT_URI: process.env.WIX_OAUTH_REDIRECT_URI,
+  WIX_SITE_ID: process.env.WIX_SITE_ID,
   WIX_PAID_PLAN_IDS: process.env.WIX_PAID_PLAN_IDS,
   SESSION_COOKIE_SAME_SITE: process.env.SESSION_COOKIE_SAME_SITE,
   USER_STORE_FILE: process.env.USER_STORE_FILE,
@@ -47,6 +48,7 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   process.env.BILLING_WEBHOOK_SECRET = "billing-secret";
   process.env.WIX_CLIENT_ID = "wix-client-id";
   process.env.WIX_CLIENT_SECRET = "wix-client-secret";
+  process.env.WIX_SITE_ID = "fd0e212b-a904-4916-88c2-7af87a48aa9b";
   process.env.WIX_PAID_PLAN_IDS = "plan-doors";
   process.env.USER_STORE_FILE = userStoreFile;
   process.env.LEGACY_STORE_FILE = legacyStoreFile;
@@ -75,7 +77,7 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   let wixMemberStatus = 200;
   let wixMemberOrdersStatus = 200;
 
-  const wixFetch = async (url) => {
+  const wixFetch = async (url, options = {}) => {
     if (url === "https://www.wixapis.com/oauth2/token") {
       return new Response(JSON.stringify({
         access_token: "site-access-token",
@@ -89,13 +91,16 @@ test("health/config, auth session, project isolation, and billing entitlement", 
       }), { status: 200, headers: { "content-type": "application/json" } });
     }
     if (url === "https://www.wixapis.com/members/v1/members/my?fieldSet=FULL") {
+      assert.equal(options.headers["wix-site-id"], process.env.WIX_SITE_ID);
       return new Response(JSON.stringify(wixMemberResponse), { status: wixMemberStatus, headers: { "content-type": "application/json" } });
     }
     if (url === "https://www.wixapis.com/pricing-plans/v2/member/orders") {
+      assert.equal(options.headers["wix-site-id"], process.env.WIX_SITE_ID);
       return new Response(JSON.stringify(wixMemberOrdersResponse), { status: wixMemberOrdersStatus, headers: { "content-type": "application/json" } });
     }
     const parsed = new URL(url);
     const buyerId = parsed.searchParams.get("buyerIds");
+    assert.equal(options.headers["wix-site-id"], process.env.WIX_SITE_ID);
     if (buyerId === "member-a") {
       return new Response(JSON.stringify({
         orders: [
@@ -136,6 +141,7 @@ test("health/config, auth session, project isolation, and billing entitlement", 
     if (originalEnv.WIX_CLIENT_ID === undefined) delete process.env.WIX_CLIENT_ID; else process.env.WIX_CLIENT_ID = originalEnv.WIX_CLIENT_ID;
     if (originalEnv.WIX_CLIENT_SECRET === undefined) delete process.env.WIX_CLIENT_SECRET; else process.env.WIX_CLIENT_SECRET = originalEnv.WIX_CLIENT_SECRET;
     if (originalEnv.WIX_OAUTH_REDIRECT_URI === undefined) delete process.env.WIX_OAUTH_REDIRECT_URI; else process.env.WIX_OAUTH_REDIRECT_URI = originalEnv.WIX_OAUTH_REDIRECT_URI;
+    if (originalEnv.WIX_SITE_ID === undefined) delete process.env.WIX_SITE_ID; else process.env.WIX_SITE_ID = originalEnv.WIX_SITE_ID;
     if (originalEnv.WIX_PAID_PLAN_IDS === undefined) delete process.env.WIX_PAID_PLAN_IDS; else process.env.WIX_PAID_PLAN_IDS = originalEnv.WIX_PAID_PLAN_IDS;
     if (originalEnv.SESSION_COOKIE_SAME_SITE === undefined) delete process.env.SESSION_COOKIE_SAME_SITE; else process.env.SESSION_COOKIE_SAME_SITE = originalEnv.SESSION_COOKIE_SAME_SITE;
     if (originalEnv.USER_STORE_FILE === undefined) delete process.env.USER_STORE_FILE; else process.env.USER_STORE_FILE = originalEnv.USER_STORE_FILE;
@@ -621,6 +627,7 @@ test("server boots without SESSION_SECRET and keeps sessions valid across restar
     if (originalEnv.WIX_CLIENT_ID === undefined) delete process.env.WIX_CLIENT_ID; else process.env.WIX_CLIENT_ID = originalEnv.WIX_CLIENT_ID;
     if (originalEnv.WIX_CLIENT_SECRET === undefined) delete process.env.WIX_CLIENT_SECRET; else process.env.WIX_CLIENT_SECRET = originalEnv.WIX_CLIENT_SECRET;
     if (originalEnv.WIX_OAUTH_REDIRECT_URI === undefined) delete process.env.WIX_OAUTH_REDIRECT_URI; else process.env.WIX_OAUTH_REDIRECT_URI = originalEnv.WIX_OAUTH_REDIRECT_URI;
+    if (originalEnv.WIX_SITE_ID === undefined) delete process.env.WIX_SITE_ID; else process.env.WIX_SITE_ID = originalEnv.WIX_SITE_ID;
     if (originalEnv.WIX_PAID_PLAN_IDS === undefined) delete process.env.WIX_PAID_PLAN_IDS; else process.env.WIX_PAID_PLAN_IDS = originalEnv.WIX_PAID_PLAN_IDS;
     if (originalEnv.SESSION_COOKIE_SAME_SITE === undefined) delete process.env.SESSION_COOKIE_SAME_SITE; else process.env.SESSION_COOKIE_SAME_SITE = originalEnv.SESSION_COOKIE_SAME_SITE;
     if (originalEnv.USER_STORE_FILE === undefined) delete process.env.USER_STORE_FILE; else process.env.USER_STORE_FILE = originalEnv.USER_STORE_FILE;

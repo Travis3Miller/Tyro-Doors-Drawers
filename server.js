@@ -271,6 +271,19 @@ function wixRedirectUri() {
   return (process.env.WIX_OAUTH_REDIRECT_URI || "").trim();
 }
 
+function wixSiteId() {
+  return (process.env.WIX_SITE_ID || "").trim();
+}
+
+function wixRequestHeaders(headers = {}) {
+  const nextHeaders = { ...headers };
+  const siteId = wixSiteId();
+  if (siteId) {
+    nextHeaders["wix-site-id"] = siteId;
+  }
+  return nextHeaders;
+}
+
 async function exchangeWixAuthCode(code, redirectUri, fetchImpl = fetch) {
   const clientId = (process.env.WIX_CLIENT_ID || "").trim();
   const clientSecret = (process.env.WIX_CLIENT_SECRET || "").trim();
@@ -339,9 +352,9 @@ async function getWixMemberFromToken(accessToken, fetchImpl = fetch) {
   }
   const response = await fetchImpl("https://www.wixapis.com/members/v1/members/my?fieldSet=FULL", {
     method: "GET",
-    headers: {
+    headers: wixRequestHeaders({
       Authorization: "Bearer " + accessToken
-    }
+    })
   });
   if (!response.ok) {
     throw new Error(`Wix member profile request failed with ${response.status}.`);
@@ -508,10 +521,10 @@ async function getWixOrdersForCurrentMember(accessToken, fetchImpl = fetch) {
   }
   const response = await fetchImpl("https://www.wixapis.com/pricing-plans/v2/member/orders", {
     method: "GET",
-    headers: {
+    headers: wixRequestHeaders({
       Authorization: "Bearer " + accessToken,
       "Content-Type": "application/json"
-    }
+    })
   });
   if (!response.ok) {
     throw new Error(`Wix member orders request failed with ${response.status}.`);
@@ -535,10 +548,10 @@ async function getWixOrdersForMember(memberId, fetchImpl = fetch, tokenCache = {
 
   const response = await fetchImpl(url.toString(), {
     method: "GET",
-    headers: {
+    headers: wixRequestHeaders({
       Authorization: "Bearer " + wixAccessToken,
       "Content-Type": "application/json"
-    }
+    })
   });
 
   if (!response.ok) {
