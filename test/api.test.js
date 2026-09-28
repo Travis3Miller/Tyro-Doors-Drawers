@@ -843,8 +843,7 @@ test("account name diagnostics expose storage and logging checkpoints", async (t
   assert.equal(sessionRes.status, 200);
   const sessionBody = await sessionRes.json();
   assert.equal(sessionBody.user.name, "Diagnostic User");
-  assert.equal(sessionBody.diagnostics.accountName.storedName, "Diagnostic User");
-  assert.equal(sessionBody.diagnostics.accountName.storage, `file ${userStoreFile} users[].name`);
+  assert.equal(sessionBody.diagnostics.accountName.enabled, true);
 
   const persisted = JSON.parse(await fs.readFile(userStoreFile, "utf8"));
   assert.equal(persisted.users[0].name, "Diagnostic User");
@@ -852,4 +851,5 @@ test("account name diagnostics expose storage and logging checkpoints", async (t
   const checkpoints = infoMock.mock.calls.map((call) => call.arguments.join(" "));
   assert.ok(checkpoints.some((line) => line.includes("\"checkpoint\":\"user-store-insert\"")));
   assert.ok(checkpoints.some((line) => line.includes("\"checkpoint\":\"session-response\"")));
+  assert.ok(checkpoints.some((line) => line.includes(`\"storage\":\"file ${userStoreFile} users[].name\"`)));
 });

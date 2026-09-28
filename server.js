@@ -1034,13 +1034,14 @@ function createApp(options = {}) {
     if (accountNameDiagnosticsEnabled()) {
       payload.diagnostics = {
         accountName: {
-          storage: accountNameStorageLocation(userStore),
-          sessionUserId: user && user.id ? user.id : "",
-          storedName: user && user.name ? user.name : "",
-          storedEmail: user && user.email ? user.email : ""
+          enabled: true
         }
       };
-      logAccountNameCheckpoint("session-response", payload.diagnostics.accountName);
+      logAccountNameCheckpoint("session-response", {
+        storage: accountNameStorageLocation(userStore),
+        sessionUserId: user && user.id ? user.id : "",
+        storedName: user && user.name ? user.name : ""
+      });
     }
     res.json(payload);
   });
@@ -1129,7 +1130,6 @@ function createApp(options = {}) {
       const identity = identityFromWixMember(wixMember);
       logAccountNameCheckpoint("wix-identity", {
         storage: accountNameStorageLocation(userStore),
-        email: identity.email,
         derivedName: identity.name,
         externalMemberId: identity.externalMemberId,
         wixProfileName: wixMember && wixMember.profile ? wixMember.profile.name || "" : "",

@@ -27,11 +27,9 @@ function logAccountNamePersistence(mode, filePath, checkpoint, identity, user) {
   console.info("[account-name]", JSON.stringify({
     checkpoint,
     storage: accountNameStorageLocation(mode, filePath),
-    incomingEmail: identity && identity.email ? identity.email : "",
     incomingName: identity && identity.name ? identity.name : "",
     userId: user && user.id ? user.id : "",
     storedName: user && user.name ? user.name : "",
-    storedEmail: user && user.email ? user.email : "",
     externalMemberId: user && user.externalMemberId ? user.externalMemberId : ""
   }));
 }
