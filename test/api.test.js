@@ -843,7 +843,7 @@ test("account name diagnostics expose storage and logging checkpoints", async (t
   assert.equal(sessionRes.status, 200);
   const sessionBody = await sessionRes.json();
   assert.equal(sessionBody.user.name, "Diagnostic User");
-  assert.equal(sessionBody.diagnostics.accountName.enabled, true);
+  assert.equal(sessionBody.diagnostics, undefined);
 
   const persisted = JSON.parse(await fs.readFile(userStoreFile, "utf8"));
   assert.equal(persisted.users[0].name, "Diagnostic User");

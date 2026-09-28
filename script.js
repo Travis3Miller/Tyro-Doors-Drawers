@@ -27,7 +27,7 @@ function accountNameDiagnosticsEnabled() {
 }
 
 function logAccountNameCheckpoint(checkpoint, details = {}) {
-  if (!accountNameDiagnosticsEnabled() && !details.diagnosticsEnabled) {
+  if (!accountNameDiagnosticsEnabled()) {
     return;
   }
   console.info("[account-name]", { checkpoint, ...details });
@@ -616,12 +616,6 @@ async function refreshWelcomeBanner() {
   try {
     const session = await apiJson("/api/auth/session");
     if (session && session.authenticated && session.user) {
-      const diagnosticsEnabled = Boolean(
-        session
-        && session.diagnostics
-        && session.diagnostics.accountName
-        && session.diagnostics.accountName.enabled
-      );
       const rawName = String(session.user.name || "").trim();
       const firstName = rawName ? rawName.split(/\s+/)[0] : "";
       const rawEmail = String(session.user.email || "").trim();
@@ -629,7 +623,6 @@ async function refreshWelcomeBanner() {
       const emailName = atIndex > 0 ? rawEmail.slice(0, atIndex).trim() : "";
       const displayName = firstName || emailName || "there";
       logAccountNameCheckpoint("welcome-banner", {
-        diagnosticsEnabled,
         rawName,
         firstName,
         rawEmail,

@@ -1026,24 +1026,18 @@ function createApp(options = {}) {
 
   app.get("/api/auth/session", (req, res) => {
     const user = req.currentUser;
-    const payload = {
-      authenticated: Boolean(user),
-      user: userSummary(user),
-      plan: resolvePlanForUser(user)
-    };
     if (accountNameDiagnosticsEnabled()) {
-      payload.diagnostics = {
-        accountName: {
-          enabled: true
-        }
-      };
       logAccountNameCheckpoint("session-response", {
         storage: accountNameStorageLocation(userStore),
         sessionUserId: user && user.id ? user.id : "",
         storedName: user && user.name ? user.name : ""
       });
     }
-    res.json(payload);
+    res.json({
+      authenticated: Boolean(user),
+      user: userSummary(user),
+      plan: resolvePlanForUser(user)
+    });
   });
 
   app.get("/api/auth/wix/login", authRateLimiter, (req, res) => {
