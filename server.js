@@ -53,6 +53,24 @@ const allowedOrigins = configuredOrigins.length ? configuredOrigins : defaultOri
 const allowAllOrigins = allowedOrigins.includes("*");
 const allowGithubPages = process.env.ALLOW_GITHUB_PAGES !== "false";
 
+function accountNameDiagnosticsEnabled() {
+  return /^(1|true|yes|on)$/i.test(String(process.env.ACCOUNT_NAME_DIAGNOSTICS || "").trim());
+}
+
+function accountNameStorageLocation(userStore) {
+  if (userStore && userStore.mode === "postgres") {
+    return "postgres users.name";
+  }
+  return `file ${userStore && userStore.filePath ? userStore.filePath : "data/user-store.json"} users[].name`;
+}
+
+function logAccountNameCheckpoint(checkpoint, details = {}) {
+  if (!accountNameDiagnosticsEnabled()) {
+    return;
+  }
+  console.info("[account-name]", JSON.stringify({ checkpoint, ...details }));
+}
+
 function isGithubPagesOrigin(origin) {
   try {
     const url = new URL(origin);
@@ -1008,6 +1026,13 @@ function createApp(options = {}) {
 
   app.get("/api/auth/session", (req, res) => {
     const user = req.currentUser;
+    if (accountNameDiagnosticsEnabled()) {
+      logAccountNameCheckpoint("session-response", {
+        storage: accountNameStorageLocation(userStore),
+        sessionUserId: user && user.id ? user.id : "",
+        storedName: user && user.name ? user.name : ""
+      });
+    }
     res.json({
       authenticated: Boolean(user),
       user: userSummary(user),
@@ -1097,6 +1122,16 @@ function createApp(options = {}) {
 
       const wixMember = await getWixMemberFromToken(accessToken, wixFetch);
       const identity = identityFromWixMember(wixMember);
+      logAccountNameCheckpoint("wix-identity", {
+        storage: accountNameStorageLocation(userStore),
+        derivedName: identity.name,
+        externalMemberId: identity.externalMemberId,
+        wixProfileName: wixMember && wixMember.profile ? wixMember.profile.name || "" : "",
+        wixProfileDisplayName: wixMember && wixMember.profile ? wixMember.profile.displayName || "" : "",
+        wixProfileNickname: wixMember && wixMember.profile ? wixMember.profile.nickname || "" : "",
+        wixContactFirstName: wixMember && wixMember.contact ? wixMember.contact.firstName || "" : wixMember && wixMember.contactDetails ? wixMember.contactDetails.firstName || "" : "",
+        wixContactLastName: wixMember && wixMember.contact ? wixMember.contact.lastName || "" : wixMember && wixMember.contactDetails ? wixMember.contactDetails.lastName || "" : ""
+      });
       if (!identity.email || !identity.externalMemberId) {
         res.status(400).json({ error: "Wix OAuth member payload missing email or member ID." });
         return;

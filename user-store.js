@@ -9,6 +9,31 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function accountNameDiagnosticsEnabled() {
+  return /^(1|true|yes|on)$/i.test(String(process.env.ACCOUNT_NAME_DIAGNOSTICS || "").trim());
+}
+
+function accountNameStorageLocation(mode, filePath) {
+  if (mode === "postgres") {
+    return "postgres users.name";
+  }
+  return `file ${filePath || DEFAULT_FILE} users[].name`;
+}
+
+function logAccountNamePersistence(mode, filePath, checkpoint, identity, user) {
+  if (!accountNameDiagnosticsEnabled()) {
+    return;
+  }
+  console.info("[account-name]", JSON.stringify({
+    checkpoint,
+    storage: accountNameStorageLocation(mode, filePath),
+    incomingName: identity && identity.name ? identity.name : "",
+    userId: user && user.id ? user.id : "",
+    storedName: user && user.name ? user.name : "",
+    externalMemberId: user && user.externalMemberId ? user.externalMemberId : ""
+  }));
+}
+
 function newId() {
   if (typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
@@ -344,7 +369,7 @@ class UserStore {
               [id, email, name, requestedPlan, requestedSubscriptionStatus, externalCustomerId || null, externalMemberId || null]
             );
             await client.query("COMMIT");
-            return mapUser({
+            const mappedUser = mapUser({
               id: inserted.rows[0].id,
               email: inserted.rows[0].email,
               name: inserted.rows[0].name,
@@ -355,6 +380,8 @@ class UserStore {
               createdAt: new Date(inserted.rows[0].created_at).toISOString(),
               updatedAt: new Date(inserted.rows[0].updated_at).toISOString()
             });
+            logAccountNamePersistence(this.mode, this.filePath, "user-store-insert", { email, name, externalMemberId }, mappedUser);
+            return mappedUser;
           }
 
           const resolvedExternalCustomerId = existing.external_customer_id || externalCustomerId || null;
@@ -381,7 +408,7 @@ class UserStore {
           );
 
           await client.query("COMMIT");
-          return mapUser({
+          const mappedUser = mapUser({
             id: updated.rows[0].id,
             email: updated.rows[0].email,
             name: updated.rows[0].name,
@@ -392,6 +419,8 @@ class UserStore {
             createdAt: new Date(updated.rows[0].created_at).toISOString(),
             updatedAt: new Date(updated.rows[0].updated_at).toISOString()
           });
+          logAccountNamePersistence(this.mode, this.filePath, "user-store-update", { email, name, externalMemberId }, mappedUser);
+          return mappedUser;
         } catch (err) {
           await client.query("ROLLBACK");
           if (err && err.code === "23505" && attempt === 0) {
@@ -424,7 +453,9 @@ class UserStore {
         };
         state.users.push(user);
         await this._writeFileState(state);
-        return mapUser(user);
+        const mappedUser = mapUser(user);
+        logAccountNamePersistence(this.mode, this.filePath, "user-store-insert", { email, name, externalMemberId }, mappedUser);
+        return mappedUser;
       }
 
       const nextExternalCustomerId = match.externalCustomerId || externalCustomerId;
@@ -437,7 +468,9 @@ class UserStore {
       match.updatedAt = nowIso();
 
       await this._writeFileState(state);
-      return mapUser(match);
+      const mappedUser = mapUser(match);
+      logAccountNamePersistence(this.mode, this.filePath, "user-store-update", { email, name, externalMemberId }, mappedUser);
+      return mappedUser;
     });
   }
 

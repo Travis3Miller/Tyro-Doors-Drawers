@@ -15,6 +15,24 @@ const ASSET_BASE_URL = typeof FRONTEND_CONFIG.assetBaseUrl === "string"
   ? FRONTEND_CONFIG.assetBaseUrl.trim().replace(/\/+$/, "")
   : "";
 
+function accountNameDiagnosticsEnabled() {
+  try {
+    if (new URLSearchParams(window.location.search).get("accountNameDiagnostics") === "1") {
+      return true;
+    }
+    return localStorage.getItem("cutlister.accountNameDiagnostics") === "true";
+  } catch (_err) {
+    return false;
+  }
+}
+
+function logAccountNameCheckpoint(checkpoint, details = {}) {
+  if (!accountNameDiagnosticsEnabled()) {
+    return;
+  }
+  console.info("[account-name]", { checkpoint, ...details });
+}
+
 function createUserId() {
   if (window.crypto && typeof window.crypto.randomUUID === "function") {
     return window.crypto.randomUUID();
@@ -604,9 +622,19 @@ async function refreshWelcomeBanner() {
       const atIndex = rawEmail.indexOf("@");
       const emailName = atIndex > 0 ? rawEmail.slice(0, atIndex).trim() : "";
       const displayName = firstName || emailName || "there";
+      logAccountNameCheckpoint("welcome-banner", {
+        rawName,
+        firstName,
+        rawEmail,
+        emailName,
+        displayName
+      });
       banner.textContent = `Welcome, ${displayName}`;
     }
   } catch (_err) {
+    logAccountNameCheckpoint("welcome-banner-error", {
+      error: _err && _err.message ? _err.message : String(_err || "")
+    });
     banner.textContent = "Welcome";
   }
 }

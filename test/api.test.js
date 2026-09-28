@@ -18,7 +18,8 @@ const originalEnv = {
   USER_STORE_FILE: process.env.USER_STORE_FILE,
   LEGACY_STORE_FILE: process.env.LEGACY_STORE_FILE,
   WIX_UPGRADE_URL: process.env.WIX_UPGRADE_URL,
-  RENDER_SERVICE_ID: process.env.RENDER_SERVICE_ID
+  RENDER_SERVICE_ID: process.env.RENDER_SERVICE_ID,
+  ACCOUNT_NAME_DIAGNOSTICS: process.env.ACCOUNT_NAME_DIAGNOSTICS
 };
 
 function signIdentity(secret, timestamp, body) {
@@ -140,6 +141,7 @@ test("health/config, auth session, project isolation, and billing entitlement", 
     if (originalEnv.USER_STORE_FILE === undefined) delete process.env.USER_STORE_FILE; else process.env.USER_STORE_FILE = originalEnv.USER_STORE_FILE;
     if (originalEnv.LEGACY_STORE_FILE === undefined) delete process.env.LEGACY_STORE_FILE; else process.env.LEGACY_STORE_FILE = originalEnv.LEGACY_STORE_FILE;
     if (originalEnv.WIX_UPGRADE_URL === undefined) delete process.env.WIX_UPGRADE_URL; else process.env.WIX_UPGRADE_URL = originalEnv.WIX_UPGRADE_URL;
+    if (originalEnv.ACCOUNT_NAME_DIAGNOSTICS === undefined) delete process.env.ACCOUNT_NAME_DIAGNOSTICS; else process.env.ACCOUNT_NAME_DIAGNOSTICS = originalEnv.ACCOUNT_NAME_DIAGNOSTICS;
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
@@ -625,6 +627,7 @@ test("server boots without SESSION_SECRET and keeps sessions valid across restar
     if (originalEnv.LEGACY_STORE_FILE === undefined) delete process.env.LEGACY_STORE_FILE; else process.env.LEGACY_STORE_FILE = originalEnv.LEGACY_STORE_FILE;
     if (originalEnv.WIX_UPGRADE_URL === undefined) delete process.env.WIX_UPGRADE_URL; else process.env.WIX_UPGRADE_URL = originalEnv.WIX_UPGRADE_URL;
     if (originalEnv.RENDER_SERVICE_ID === undefined) delete process.env.RENDER_SERVICE_ID; else process.env.RENDER_SERVICE_ID = originalEnv.RENDER_SERVICE_ID;
+    if (originalEnv.ACCOUNT_NAME_DIAGNOSTICS === undefined) delete process.env.ACCOUNT_NAME_DIAGNOSTICS; else process.env.ACCOUNT_NAME_DIAGNOSTICS = originalEnv.ACCOUNT_NAME_DIAGNOSTICS;
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
@@ -726,6 +729,7 @@ test("production cookies default to SameSite=None and allow SameSite override", 
     if (originalEnv.SESSION_COOKIE_SAME_SITE === undefined) delete process.env.SESSION_COOKIE_SAME_SITE; else process.env.SESSION_COOKIE_SAME_SITE = originalEnv.SESSION_COOKIE_SAME_SITE;
     if (originalEnv.USER_STORE_FILE === undefined) delete process.env.USER_STORE_FILE; else process.env.USER_STORE_FILE = originalEnv.USER_STORE_FILE;
     if (originalEnv.LEGACY_STORE_FILE === undefined) delete process.env.LEGACY_STORE_FILE; else process.env.LEGACY_STORE_FILE = originalEnv.LEGACY_STORE_FILE;
+    if (originalEnv.ACCOUNT_NAME_DIAGNOSTICS === undefined) delete process.env.ACCOUNT_NAME_DIAGNOSTICS; else process.env.ACCOUNT_NAME_DIAGNOSTICS = originalEnv.ACCOUNT_NAME_DIAGNOSTICS;
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
@@ -781,4 +785,71 @@ test("production cookies default to SameSite=None and allow SameSite override", 
   process.env.SESSION_COOKIE_SAME_SITE = "invalid";
   ({ createApp } = loadServerModule());
   assert.throws(() => createApp(), /SESSION_COOKIE_SAME_SITE must be one of None, Lax, or Strict/i);
+});
+
+test("account name diagnostics expose storage and logging checkpoints", async (t) => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "tyro-dd-name-diag-"));
+  const userStoreFile = path.join(tempDir, "user-store.json");
+  const legacyStoreFile = path.join(tempDir, "legacy-store.json");
+
+  process.env.NODE_ENV = "test";
+  process.env.SESSION_SECRET = "diag-session-secret";
+  process.env.IDENTITY_SHARED_SECRET = "diag-identity-secret";
+  process.env.USER_STORE_FILE = userStoreFile;
+  process.env.LEGACY_STORE_FILE = legacyStoreFile;
+  process.env.ACCOUNT_NAME_DIAGNOSTICS = "true";
+
+  const infoMock = t.mock.method(console, "info", () => {});
+  const { startServer } = loadServerModule();
+  const { server } = await startServer({ port: 0 });
+
+  t.after(async () => {
+    await new Promise((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
+    if (originalEnv.NODE_ENV === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = originalEnv.NODE_ENV;
+    if (originalEnv.SESSION_SECRET === undefined) delete process.env.SESSION_SECRET; else process.env.SESSION_SECRET = originalEnv.SESSION_SECRET;
+    if (originalEnv.IDENTITY_SHARED_SECRET === undefined) delete process.env.IDENTITY_SHARED_SECRET; else process.env.IDENTITY_SHARED_SECRET = originalEnv.IDENTITY_SHARED_SECRET;
+    if (originalEnv.USER_STORE_FILE === undefined) delete process.env.USER_STORE_FILE; else process.env.USER_STORE_FILE = originalEnv.USER_STORE_FILE;
+    if (originalEnv.LEGACY_STORE_FILE === undefined) delete process.env.LEGACY_STORE_FILE; else process.env.LEGACY_STORE_FILE = originalEnv.LEGACY_STORE_FILE;
+    if (originalEnv.ACCOUNT_NAME_DIAGNOSTICS === undefined) delete process.env.ACCOUNT_NAME_DIAGNOSTICS; else process.env.ACCOUNT_NAME_DIAGNOSTICS = originalEnv.ACCOUNT_NAME_DIAGNOSTICS;
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const userIdentity = JSON.stringify({
+    email: "diagnostic@example.com",
+    name: "Diagnostic User",
+    externalMemberId: "diag-member"
+  });
+  const timestamp = String(Date.now());
+  const signature = signIdentity(process.env.IDENTITY_SHARED_SECRET, timestamp, userIdentity);
+
+  const ssoRes = await jsonRequest(baseUrl, "/api/auth/sso", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-identity-timestamp": timestamp,
+      "x-identity-signature": signature
+    },
+    body: userIdentity
+  });
+  assert.equal(ssoRes.status, 200);
+  const sessionCookie = ssoRes.headers.get("set-cookie");
+
+  const sessionRes = await jsonRequest(baseUrl, "/api/auth/session", {
+    headers: { cookie: sessionCookie }
+  });
+  assert.equal(sessionRes.status, 200);
+  const sessionBody = await sessionRes.json();
+  assert.equal(sessionBody.user.name, "Diagnostic User");
+  assert.equal(sessionBody.diagnostics, undefined);
+
+  const persisted = JSON.parse(await fs.readFile(userStoreFile, "utf8"));
+  assert.equal(persisted.users[0].name, "Diagnostic User");
+
+  const checkpoints = infoMock.mock.calls.map((call) => call.arguments.join(" "));
+  assert.ok(checkpoints.some((line) => line.includes("\"checkpoint\":\"user-store-insert\"")));
+  assert.ok(checkpoints.some((line) => line.includes("\"checkpoint\":\"session-response\"")));
+  assert.ok(checkpoints.some((line) => line.includes(`\"storage\":\"file ${userStoreFile} users[].name\"`)));
 });
