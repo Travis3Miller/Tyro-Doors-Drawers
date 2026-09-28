@@ -73,6 +73,7 @@ Required for production:
 - `WIX_CLIENT_ID`
 - `WIX_CLIENT_SECRET`
 - `WIX_OAUTH_REDIRECT_URI`
+- `WIX_SITE_ID`
 - `WIX_UPGRADE_URL`
 
 Optional:
