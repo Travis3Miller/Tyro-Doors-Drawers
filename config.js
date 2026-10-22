@@ -8,5 +8,5 @@ window.CUTLISTER_CONFIG = {
   assetBaseUrl: "",
   // Origins of the Wix site that embeds this app (used to receive the logged-in member's name).
   // Example: ["https://www.yoursite.com"]
-  wixParentOrigins: []
+  wixParentOrigins: ["https://travis3miller.wixstudio.com"]
 };
