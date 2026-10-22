@@ -602,30 +602,6 @@ async function loadCatalog() {
   }
 }
 
-function showSignInLink(banner) {
-  const link = document.createElement("a");
-  link.href = apiUrl("/api/auth/wix/login");
-  link.textContent = "Sign in";
-  banner.textContent = "Welcome. ";
-  banner.appendChild(link);
-}
-
-function autoSignIn() {
-  if (wixMemberName) {
-    return;
-  }
-  const key = "cutlister.autoSignInAttempted";
-  try {
-    if (sessionStorage.getItem(key)) {
-      return;
-    }
-    sessionStorage.setItem(key, "1");
-  } catch (_err) {
-    return;
-  }
-  window.location.assign(apiUrl("/api/auth/wix/login"));
-}
-
 const WIX_PARENT_ORIGINS = Array.isArray(FRONTEND_CONFIG.wixParentOrigins)
   ? FRONTEND_CONFIG.wixParentOrigins.map((o) => String(o).trim().replace(/\/+$/, "")).filter(Boolean)
   : [];
@@ -690,9 +666,6 @@ async function refreshWelcomeBanner() {
         displayName
       });
       banner.textContent = `Welcome, ${displayName}`;
-    } else {
-      showSignInLink(banner);
-      autoSignIn();
     }
   } catch (_err) {
     logAccountNameCheckpoint("welcome-banner-error", {
