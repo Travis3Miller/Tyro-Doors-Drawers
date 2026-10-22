@@ -726,3 +726,7 @@ button.danger:hover {
     min-width: 140px;
   }
 }
+
+.paid-star {
+  color: #d4a017;
+}

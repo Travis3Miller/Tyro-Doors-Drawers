@@ -606,12 +606,21 @@ const WIX_PARENT_ORIGINS = Array.isArray(FRONTEND_CONFIG.wixParentOrigins)
   ? FRONTEND_CONFIG.wixParentOrigins.map((o) => String(o).trim().replace(/\/+$/, "")).filter(Boolean)
   : [];
 let wixMemberName = "";
+let wixMemberPaid = false;
 
-function setWelcomeName(rawName) {
+function setWelcomeName(rawName, paid = wixMemberPaid) {
   const banner = byId("welcomeBanner");
   const firstName = String(rawName || "").trim().split(/\s+/)[0];
   if (banner && firstName) {
     banner.textContent = `Welcome, ${firstName}`;
+    if (paid) {
+      const star = document.createElement("span");
+      star.className = "paid-star";
+      star.textContent = " \u2605";
+      star.title = "Extended version";
+      star.setAttribute("aria-label", "Extended version");
+      banner.appendChild(star);
+    }
   }
 }
 
@@ -628,6 +637,7 @@ function listenForWixMember() {
       return;
     }
     wixMemberName = data.name.slice(0, 100);
+    wixMemberPaid = data.paid === true;
     setWelcomeName(wixMemberName);
   });
   if (window.parent && window.parent !== window) {
@@ -665,7 +675,7 @@ async function refreshWelcomeBanner() {
         emailName,
         displayName
       });
-      banner.textContent = `Welcome, ${displayName}`;
+      setWelcomeName(displayName, session.plan === "pro");
     }
   } catch (_err) {
     logAccountNameCheckpoint("welcome-banner-error", {
