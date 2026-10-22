@@ -613,14 +613,13 @@ function setWelcomeName(rawName, paid = wixMemberPaid) {
   const firstName = String(rawName || "").trim().split(/\s+/)[0];
   if (banner && firstName) {
     banner.textContent = `Welcome, ${firstName}`;
-    if (paid) {
-      const star = document.createElement("span");
-      star.className = "paid-star";
-      star.textContent = " \u2605";
-      star.title = "Extended version";
-      star.setAttribute("aria-label", "Extended version");
-      banner.appendChild(star);
-    }
+    const star = document.createElement("span");
+    star.className = paid ? "member-star paid" : "member-star";
+    star.textContent = " \u2605";
+    const label = paid ? "Extended version active" : "Extended version not active";
+    star.title = label;
+    star.setAttribute("aria-label", label);
+    banner.appendChild(star);
   }
 }
 
@@ -675,7 +674,7 @@ async function refreshWelcomeBanner() {
         emailName,
         displayName
       });
-      setWelcomeName(displayName, session.plan === "pro");
+      setWelcomeName(displayName, wixMemberPaid || session.plan === "pro");
     }
   } catch (_err) {
     logAccountNameCheckpoint("welcome-banner-error", {
