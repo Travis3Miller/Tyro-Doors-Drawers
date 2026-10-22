@@ -118,18 +118,32 @@ When the app is embedded in your Wix site, the page can pass the logged-in membe
 Add your site origin(s) to `wixParentOrigins` in `config.js`, then add this Velo code to the Wix page with the app's HTML iframe (`#html1`):
 
 ```js
-import wixUsers from "wix-users";
 import { currentMember } from "wix-members-frontend";
+import { orders } from "wix-pricing-plans-frontend";
 
-$w.onReady(async () => {
-  const send = async () => {
-    if (!wixUsers.currentUser.loggedIn) return;
-    const m = await currentMember.getMember({ fieldsets: ["FULL"] });
-    const name = (m.contactDetails && m.contactDetails.firstName)
-      || (m.profile && (m.profile.nickname || m.profile.slug)) || "";
-    $w("#html1").postMessage({ type: "wix-member", name });
+// Plan IDs of the paid/extended version (same IDs as WIX_PAID_PLAN_IDS on the server)
+const PAID_PLAN_IDS = ["YOUR-PLAN-ID"];
+
+$w.onReady(() => {
+  const isPaid = async () => {
+    try {
+      const list = await orders.listCurrentMemberOrders();
+      return list.some((o) => o.status === "ACTIVE"
+        && PAID_PLAN_IDS.map((p) => p.toUpperCase()).includes(String(o.planId).toUpperCase()));
+    } catch (e) {
+      return false;
+    }
   };
-  $w("#html1").onMessage((e) => { if (e.data && e.data.type === "cutlister-ready") send(); });
+  const send = async () => {
+    const m = await currentMember.getMember({ fieldsets: ["FULL"] });
+    if (!m) return;
+    const name = (m.contactDetails && m.contactDetails.firstName)
+      || (m.profile && m.profile.nickname) || "";
+    if (name) $w("#html1").postMessage({ type: "wix-member", name, paid: await isPaid() });
+  };
+  $w("#html1").onMessage((e) => {
+    if (e.data && e.data.type === "cutlister-ready") send();
+  });
   send();
 });
 ```

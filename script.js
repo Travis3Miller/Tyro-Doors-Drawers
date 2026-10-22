@@ -602,40 +602,24 @@ async function loadCatalog() {
   }
 }
 
-function showSignInLink(banner) {
-  const link = document.createElement("a");
-  link.href = apiUrl("/api/auth/wix/login");
-  link.textContent = "Sign in";
-  banner.textContent = "Welcome. ";
-  banner.appendChild(link);
-}
-
-function autoSignIn() {
-  if (wixMemberName) {
-    return;
-  }
-  const key = "cutlister.autoSignInAttempted";
-  try {
-    if (sessionStorage.getItem(key)) {
-      return;
-    }
-    sessionStorage.setItem(key, "1");
-  } catch (_err) {
-    return;
-  }
-  window.location.assign(apiUrl("/api/auth/wix/login"));
-}
-
 const WIX_PARENT_ORIGINS = Array.isArray(FRONTEND_CONFIG.wixParentOrigins)
   ? FRONTEND_CONFIG.wixParentOrigins.map((o) => String(o).trim().replace(/\/+$/, "")).filter(Boolean)
   : [];
 let wixMemberName = "";
+let wixMemberPaid = false;
 
-function setWelcomeName(rawName) {
+function setWelcomeName(rawName, paid = wixMemberPaid) {
   const banner = byId("welcomeBanner");
   const firstName = String(rawName || "").trim().split(/\s+/)[0];
   if (banner && firstName) {
     banner.textContent = `Welcome, ${firstName}`;
+    const star = document.createElement("span");
+    star.className = paid ? "member-star paid" : "member-star";
+    star.textContent = " \u2605";
+    const label = paid ? "Extended version active" : "Extended version not active";
+    star.title = label;
+    star.setAttribute("aria-label", label);
+    banner.appendChild(star);
   }
 }
 
@@ -652,6 +636,7 @@ function listenForWixMember() {
       return;
     }
     wixMemberName = data.name.slice(0, 100);
+    wixMemberPaid = data.paid === true;
     setWelcomeName(wixMemberName);
   });
   if (window.parent && window.parent !== window) {
@@ -689,10 +674,7 @@ async function refreshWelcomeBanner() {
         emailName,
         displayName
       });
-      banner.textContent = `Welcome, ${displayName}`;
-    } else {
-      showSignInLink(banner);
-      autoSignIn();
+      setWelcomeName(displayName, wixMemberPaid || session.plan === "pro");
     }
   } catch (_err) {
     logAccountNameCheckpoint("welcome-banner-error", {
