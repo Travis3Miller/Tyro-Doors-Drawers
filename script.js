@@ -602,12 +602,56 @@ async function loadCatalog() {
   }
 }
 
+function showSignInLink(banner) {
+  const link = document.createElement("a");
+  link.href = apiUrl("/api/auth/wix/login");
+  link.textContent = "Sign in";
+  banner.textContent = "Welcome. ";
+  banner.appendChild(link);
+}
+
+const WIX_PARENT_ORIGINS = Array.isArray(FRONTEND_CONFIG.wixParentOrigins)
+  ? FRONTEND_CONFIG.wixParentOrigins.map((o) => String(o).trim().replace(/\/+$/, "")).filter(Boolean)
+  : [];
+let wixMemberName = "";
+
+function setWelcomeName(rawName) {
+  const banner = byId("welcomeBanner");
+  const firstName = String(rawName || "").trim().split(/\s+/)[0];
+  if (banner && firstName) {
+    banner.textContent = `Welcome, ${firstName}`;
+  }
+}
+
+function listenForWixMember() {
+  if (!WIX_PARENT_ORIGINS.length) {
+    return;
+  }
+  window.addEventListener("message", (event) => {
+    if (!WIX_PARENT_ORIGINS.includes(event.origin)) {
+      return;
+    }
+    const data = event.data;
+    if (!data || data.type !== "wix-member" || typeof data.name !== "string") {
+      return;
+    }
+    wixMemberName = data.name.slice(0, 100);
+    setWelcomeName(wixMemberName);
+  });
+  if (window.parent && window.parent !== window) {
+    WIX_PARENT_ORIGINS.forEach((origin) => {
+      window.parent.postMessage({ type: "cutlister-ready" }, origin);
+    });
+  }
+}
+
 async function refreshWelcomeBanner() {
   const banner = byId("welcomeBanner");
   if (!banner) {
     return;
   }
   banner.textContent = "Welcome";
+  setWelcomeName(wixMemberName);
 
   if (await ensureDataMode() !== "api") {
     return;
@@ -630,6 +674,8 @@ async function refreshWelcomeBanner() {
         displayName
       });
       banner.textContent = `Welcome, ${displayName}`;
+    } else {
+      showSignInLink(banner);
     }
   } catch (_err) {
     logAccountNameCheckpoint("welcome-banner-error", {
@@ -3624,6 +3670,7 @@ function wireButtons() {
 }
 
 async function init() {
+  listenForWixMember();
   await loadCatalog();
   await refreshWelcomeBanner();
   wireTabs();

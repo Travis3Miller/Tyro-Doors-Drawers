@@ -5,5 +5,8 @@ window.CUTLISTER_CONFIG = {
   apiBaseUrl: "",
   // Optional: override asset host for reference images.
   // Example: "https://your-service.onrender.com"
-  assetBaseUrl: ""
+  assetBaseUrl: "",
+  // Origins of the Wix site that embeds this app (used to receive the logged-in member's name).
+  // Example: ["https://www.yoursite.com"]
+  wixParentOrigins: ["https://travis3miller.wixstudio.com"]
 };
