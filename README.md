@@ -111,3 +111,25 @@ Without `DATABASE_URL`, user/account/project/preset data falls back to local JSO
 - Render Postgres database resource
 - `DATABASE_URL` wiring from that database
 - secret env var placeholders for identity/billing/session config
+
+## Welcome banner from the Wix member
+
+When the app is embedded in your Wix site, the page can pass the logged-in member's name to it (no separate sign-in).
+Add your site origin(s) to `wixParentOrigins` in `config.js`, then add this Velo code to the Wix page with the app's HTML iframe (`#html1`):
+
+```js
+import wixUsers from "wix-users";
+import { currentMember } from "wix-members-frontend";
+
+$w.onReady(async () => {
+  const send = async () => {
+    if (!wixUsers.currentUser.loggedIn) return;
+    const m = await currentMember.getMember({ fieldsets: ["FULL"] });
+    const name = (m.contactDetails && m.contactDetails.firstName)
+      || (m.profile && (m.profile.nickname || m.profile.slug)) || "";
+    $w("#html1").postMessage({ type: "wix-member", name });
+  };
+  $w("#html1").onMessage((e) => { if (e.data && e.data.type === "cutlister-ready") send(); });
+  send();
+});
+```
