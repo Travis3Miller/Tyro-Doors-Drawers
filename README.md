@@ -80,6 +80,7 @@ Optional:
 
 - `WIX_PAID_PLAN_IDS` (recommended, comma-separated Wix plan IDs)
 - `WIX_OAUTH_SCOPE`
+- `WIX_POST_LOGIN_REDIRECT_URL` (optional; where to send the browser after Wix sign-in, e.g. your app's page URL, so the welcome banner shows the member's name)
 - `DATA_RETENTION_MONTHS` (default `13`)
 - `CORS_ORIGINS`
 - `SESSION_COOKIE_SAME_SITE` (`None`, `Lax`, or `Strict`; defaults to `None` in production and `Lax` otherwise)

@@ -1199,6 +1199,11 @@ function createApp(options = {}) {
         "Set-Cookie",
         serializeCookie(SESSION_COOKIE_NAME, token, getSessionCookieOptions(Math.floor(SESSION_TTL_MS / 1000), sessionCookieSameSite))
       );
+      const postLoginUrl = (process.env.WIX_POST_LOGIN_REDIRECT_URL || "").trim();
+      if (/^https?:\/\//i.test(postLoginUrl)) {
+        res.redirect(postLoginUrl);
+        return;
+      }
       res.json({
         authenticated: true,
         user: userSummary(user),

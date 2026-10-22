@@ -602,6 +602,14 @@ async function loadCatalog() {
   }
 }
 
+function showSignInLink(banner) {
+  const link = document.createElement("a");
+  link.href = apiUrl("/api/auth/wix/login");
+  link.textContent = "Sign in";
+  banner.textContent = "Welcome. ";
+  banner.appendChild(link);
+}
+
 async function refreshWelcomeBanner() {
   const banner = byId("welcomeBanner");
   if (!banner) {
@@ -630,6 +638,8 @@ async function refreshWelcomeBanner() {
         displayName
       });
       banner.textContent = `Welcome, ${displayName}`;
+    } else {
+      showSignInLink(banner);
     }
   } catch (_err) {
     logAccountNameCheckpoint("welcome-banner-error", {
