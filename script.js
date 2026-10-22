@@ -610,6 +610,22 @@ function showSignInLink(banner) {
   banner.appendChild(link);
 }
 
+function autoSignIn() {
+  if (wixMemberName) {
+    return;
+  }
+  const key = "cutlister.autoSignInAttempted";
+  try {
+    if (sessionStorage.getItem(key)) {
+      return;
+    }
+    sessionStorage.setItem(key, "1");
+  } catch (_err) {
+    return;
+  }
+  window.location.assign(apiUrl("/api/auth/wix/login"));
+}
+
 const WIX_PARENT_ORIGINS = Array.isArray(FRONTEND_CONFIG.wixParentOrigins)
   ? FRONTEND_CONFIG.wixParentOrigins.map((o) => String(o).trim().replace(/\/+$/, "")).filter(Boolean)
   : [];
@@ -676,6 +692,7 @@ async function refreshWelcomeBanner() {
       banner.textContent = `Welcome, ${displayName}`;
     } else {
       showSignInLink(banner);
+      autoSignIn();
     }
   } catch (_err) {
     logAccountNameCheckpoint("welcome-banner-error", {
