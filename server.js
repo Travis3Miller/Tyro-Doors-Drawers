@@ -14,6 +14,7 @@ const SERVE_STATIC = process.env.SERVE_STATIC !== "false";
 const SESSION_COOKIE_NAME = "cabinet_session";
 const OAUTH_STATE_TTL_MS = 1000 * 60 * 10;
 const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 24 * 30);
+const WIX_BRIDGE_SESSION_TTL_MS = 1000 * 60 * 30;
 const PRO_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "paid", "pending"]);
 const DENIED_ORDER_STATUSES = new Set(["CANCELED", "ENDED", "PAUSED", "REFUNDED", "FAILED"]);
 const RETENTION_MONTHS = Number(process.env.DATA_RETENTION_MONTHS || 13);
@@ -375,7 +376,7 @@ function identityFromWixMember(member) {
       ? source.contactDetails
       : {};
   const email = String(source.loginEmail || source.email || profile.email || "").trim().toLowerCase();
-  const externalMemberId = String(source.id || source.memberId || "").trim();
+  const externalMemberId = String(source.id || source._id || source.memberId || "").trim();
   const fullName = [contact.firstName, contact.lastName]
     .map((part) => String(part || "").trim())
     .filter(Boolean)
@@ -437,6 +438,12 @@ function billingTrusted(req) {
     return false;
   }
   return safeCompare(provided, sharedSecret);
+}
+
+function wixBridgeTrusted(req) {
+  const sharedSecret = (process.env.WIX_BRIDGE_SECRET || "").trim();
+  const provided = req.get("x-wix-bridge-secret") || "";
+  return Boolean(sharedSecret && provided && safeCompare(provided, sharedSecret));
 }
 
 function parseCsvEnv(value) {
@@ -955,7 +962,9 @@ function createApp(options = {}) {
       await userStoreReady;
       req.currentUser = null;
       const cookies = readCookies(req);
-      const token = cookies[SESSION_COOKIE_NAME];
+      const authorization = req.get("authorization") || "";
+      const bearerMatch = authorization.match(/^Bearer\s+(.+)$/i);
+      const token = bearerMatch ? bearerMatch[1].trim() : cookies[SESSION_COOKIE_NAME];
       const session = verifySessionToken(token, sessionSecret);
       if (session && session.userId) {
         req.currentUser = await userStore.getUserById(session.userId);
@@ -1242,6 +1251,53 @@ function createApp(options = {}) {
         authenticated: true,
         user: userSummary(user),
         plan: resolvePlanForUser(user)
+      });
+
+      app.post("/api/auth/wix/bridge", authRateLimiter, async (req, res) => {
+        try {
+          await userStoreReady;
+          if (!wixBridgeTrusted(req)) {
+            res.status(401).json({ error: "Untrusted Wix bridge request." });
+            return;
+          }
+
+          const source = req.body && typeof req.body === "object" ? req.body : {};
+          const identity = {
+            email: typeof source.email === "string" ? source.email : "",
+            name: typeof source.name === "string" ? source.name.slice(0, 100) : "",
+            externalMemberId: typeof source.externalMemberId === "string"
+              ? source.externalMemberId.trim().slice(0, 200)
+              : ""
+          };
+          if (!identity.externalMemberId) {
+            res.status(400).json({ error: "Wix member ID is required." });
+            return;
+          }
+
+          let user = await userStore.upsertUserFromIdentity(identity);
+          const access = await evaluateSaveAccessForUser(user, userStore, wixFetch, wixClientTokenCache);
+          if (access.user) {
+            user = access.user;
+          }
+
+          const sessionToken = createSessionToken(
+            { userId: user.id, exp: Date.now() + WIX_BRIDGE_SESSION_TTL_MS },
+            sessionSecret
+          );
+          res.json({
+            authenticated: true,
+            user: userSummary(user),
+            plan: access.allowed ? "pro" : "free",
+            paid: access.allowed,
+            sessionToken
+          });
+        } catch (err) {
+          if (err && /Conflicting identity match/i.test(err.message)) {
+            res.status(409).json({ error: "Conflicting Wix member identity." });
+            return;
+          }
+          res.status(503).json({ error: "Could not establish Wix member session." });
+        }
       });
     } catch (err) {
       if (err && /Conflicting identity match/i.test(err.message)) {
