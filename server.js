@@ -920,6 +920,9 @@ function attachRawBody(req, _res, buffer) {
 
 function createApp(options = {}) {
   const app = express();
+  if (process.env.NODE_ENV === "production") {
+    app.set("trust proxy", 1);
+  }
   const { secret: sessionSecret, mode: sessionSecretMode } = getSessionSecret();
   if (sessionSecretMode === "ephemeral") {
     console.warn("SESSION_SECRET is not set. Using an ephemeral in-memory secret; sessions will be reset on restart.");
