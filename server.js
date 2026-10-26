@@ -962,9 +962,13 @@ function createApp(options = {}) {
       await userStoreReady;
       req.currentUser = null;
       const cookies = readCookies(req);
-      const authorization = req.get("authorization") || "";
-      const bearerMatch = authorization.match(/^Bearer\s+(.+)$/i);
-      const token = bearerMatch ? bearerMatch[1].trim() : cookies[SESSION_COOKIE_NAME];
+      const authorization = (req.get("authorization") || "").trim();
+      const bearerSeparator = authorization.indexOf(" ");
+      const bearerScheme = bearerSeparator >= 0 ? authorization.slice(0, bearerSeparator) : "";
+      const bearerToken = bearerScheme.toLowerCase() === "bearer"
+        ? authorization.slice(bearerSeparator + 1).trim()
+        : "";
+      const token = bearerToken || cookies[SESSION_COOKIE_NAME];
       const session = verifySessionToken(token, sessionSecret);
       if (session && session.userId) {
         req.currentUser = await userStore.getUserById(session.userId);
