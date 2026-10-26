@@ -920,6 +920,9 @@ function attachRawBody(req, _res, buffer) {
 
 function createApp(options = {}) {
   const app = express();
+  if (process.env.NODE_ENV === "production") {
+    app.set("trust proxy", 1);
+  }
   const { secret: sessionSecret, mode: sessionSecretMode } = getSessionSecret();
   if (sessionSecretMode === "ephemeral") {
     console.warn("SESSION_SECRET is not set. Using an ephemeral in-memory secret; sessions will be reset on restart.");
@@ -1287,7 +1290,14 @@ function createApp(options = {}) {
       }
 
       let user = await userStore.upsertUserFromIdentity(identity);
-      const access = await evaluateSaveAccessForUser(user, userStore, wixFetch, wixClientTokenCache);
+      let access;
+      try {
+        access = await evaluateSaveAccessForUser(user, userStore, wixFetch, wixClientTokenCache);
+      } catch (err) {
+        console.warn("Wix bridge entitlement check failed:", err && err.message ? err.message : err);
+        access = { allowed: false, reason: "entitlement-check-error" };
+      }
+      console.log(`Wix bridge: member ${identity.externalMemberId} allowed=${access.allowed} reason=${access.reason}`);
       if (access.user) {
         user = access.user;
       } else if (!access.allowed) {
