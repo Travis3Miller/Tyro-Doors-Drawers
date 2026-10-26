@@ -72,7 +72,7 @@ Required for production:
 - `BILLING_WEBHOOK_SECRET`
 - `WIX_CLIENT_ID`
 - `WIX_CLIENT_SECRET`
-- `WIX_BRIDGE_SECRET` (shared only between Render and Wix backend code; never expose it to page code)
+- `DOORS_DRAWERS_BRIDGE_SECRET` (shared only between Render and Wix backend code; never expose it to page code)
 - `WIX_OAUTH_REDIRECT_URI`
 - `WIX_SITE_ID`
 - `WIX_UPGRADE_URL`
@@ -117,8 +117,8 @@ Without `DATABASE_URL`, user/account/project/preset data falls back to local JSO
 
 The embedded app needs a backend-authenticated member session to save projects. Do not send a member ID, `paid` flag, or shared secret from browser code as proof of identity or entitlement. Instead, have a Wix backend web method obtain the signed-in member and call Render with a secret stored in Wix Secrets Manager. Render creates the member account, verifies paid access using Wix and `WIX_PAID_PLAN_IDS`, and returns a short-lived app token. Project APIs use that token and continue to scope records to the authenticated user.
 
-1. In Render, set `WIX_BRIDGE_SECRET` to a newly generated, long random value.
-2. In Wix Secrets Manager, create a secret also named `WIX_BRIDGE_SECRET` with the same value. Never place this value in Wix page code.
+1. In Render, set `DOORS_DRAWERS_BRIDGE_SECRET` to a newly generated, long random value.
+2. In Wix Secrets Manager, create a secret also named `DOORS_DRAWERS_BRIDGE_SECRET` with the same value. Never place this value in Wix page code.
 3. Add this as `backend/wixBridge.web.js` in Wix. Replace the URL only if your Render service URL differs.
 
 ```js
@@ -145,7 +145,7 @@ export const getCutlisterSession = webMethod(Permissions.SiteMember, async () =>
     throw new Error("Wix did not return the member ID and email.");
   }
 
-  const bridgeSecret = await getSecret("WIX_BRIDGE_SECRET");
+  const bridgeSecret = await getSecret("DOORS_DRAWERS_BRIDGE_SECRET");
   const response = await fetch(`${RENDER_URL}/api/auth/wix/bridge`, {
     method: "POST",
     headers: {

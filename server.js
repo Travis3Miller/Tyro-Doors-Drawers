@@ -441,7 +441,7 @@ function billingTrusted(req) {
 }
 
 function wixBridgeTrusted(req) {
-  const sharedSecret = (process.env.WIX_BRIDGE_SECRET || "").trim();
+  const sharedSecret = (process.env.DOORS_DRAWERS_BRIDGE_SECRET || "").trim();
   const provided = req.get("x-wix-bridge-secret") || "";
   return Boolean(sharedSecret && provided && safeCompare(provided, sharedSecret));
 }

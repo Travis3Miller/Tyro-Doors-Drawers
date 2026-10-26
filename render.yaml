@@ -34,7 +34,7 @@ services:
         sync: false
       - key: WIX_CLIENT_SECRET
         sync: false
-      - key: WIX_BRIDGE_SECRET
+      - key: DOORS_DRAWERS_BRIDGE_SECRET
         sync: false
       - key: WIX_PAID_PLAN_IDS
         sync: false

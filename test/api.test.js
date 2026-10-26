@@ -12,7 +12,7 @@ const originalEnv = {
   BILLING_WEBHOOK_SECRET: process.env.BILLING_WEBHOOK_SECRET,
   WIX_CLIENT_ID: process.env.WIX_CLIENT_ID,
   WIX_CLIENT_SECRET: process.env.WIX_CLIENT_SECRET,
-  WIX_BRIDGE_SECRET: process.env.WIX_BRIDGE_SECRET,
+  DOORS_DRAWERS_BRIDGE_SECRET: process.env.DOORS_DRAWERS_BRIDGE_SECRET,
   WIX_OAUTH_REDIRECT_URI: process.env.WIX_OAUTH_REDIRECT_URI,
   WIX_SITE_ID: process.env.WIX_SITE_ID,
   WIX_PAID_PLAN_IDS: process.env.WIX_PAID_PLAN_IDS,
@@ -49,7 +49,7 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   process.env.BILLING_WEBHOOK_SECRET = "billing-secret";
   process.env.WIX_CLIENT_ID = "wix-client-id";
   process.env.WIX_CLIENT_SECRET = "wix-client-secret";
-  process.env.WIX_BRIDGE_SECRET = "wix-bridge-secret";
+  process.env.DOORS_DRAWERS_BRIDGE_SECRET = "doors-drawers-bridge-secret";
   process.env.WIX_SITE_ID = "fd0e212b-a904-4916-88c2-7af87a48aa9b";
   process.env.WIX_PAID_PLAN_IDS = "plan-doors";
   process.env.USER_STORE_FILE = userStoreFile;
@@ -142,7 +142,7 @@ test("health/config, auth session, project isolation, and billing entitlement", 
     if (originalEnv.BILLING_WEBHOOK_SECRET === undefined) delete process.env.BILLING_WEBHOOK_SECRET; else process.env.BILLING_WEBHOOK_SECRET = originalEnv.BILLING_WEBHOOK_SECRET;
     if (originalEnv.WIX_CLIENT_ID === undefined) delete process.env.WIX_CLIENT_ID; else process.env.WIX_CLIENT_ID = originalEnv.WIX_CLIENT_ID;
     if (originalEnv.WIX_CLIENT_SECRET === undefined) delete process.env.WIX_CLIENT_SECRET; else process.env.WIX_CLIENT_SECRET = originalEnv.WIX_CLIENT_SECRET;
-    if (originalEnv.WIX_BRIDGE_SECRET === undefined) delete process.env.WIX_BRIDGE_SECRET; else process.env.WIX_BRIDGE_SECRET = originalEnv.WIX_BRIDGE_SECRET;
+    if (originalEnv.DOORS_DRAWERS_BRIDGE_SECRET === undefined) delete process.env.DOORS_DRAWERS_BRIDGE_SECRET; else process.env.DOORS_DRAWERS_BRIDGE_SECRET = originalEnv.DOORS_DRAWERS_BRIDGE_SECRET;
     if (originalEnv.WIX_OAUTH_REDIRECT_URI === undefined) delete process.env.WIX_OAUTH_REDIRECT_URI; else process.env.WIX_OAUTH_REDIRECT_URI = originalEnv.WIX_OAUTH_REDIRECT_URI;
     if (originalEnv.WIX_SITE_ID === undefined) delete process.env.WIX_SITE_ID; else process.env.WIX_SITE_ID = originalEnv.WIX_SITE_ID;
     if (originalEnv.WIX_PAID_PLAN_IDS === undefined) delete process.env.WIX_PAID_PLAN_IDS; else process.env.WIX_PAID_PLAN_IDS = originalEnv.WIX_PAID_PLAN_IDS;
@@ -450,7 +450,7 @@ test("health/config, auth session, project isolation, and billing entitlement", 
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-wix-bridge-secret": process.env.WIX_BRIDGE_SECRET
+      "x-wix-bridge-secret": process.env.DOORS_DRAWERS_BRIDGE_SECRET
     },
     body: JSON.stringify({
       email: "user-a@example.com",
@@ -521,7 +521,7 @@ test("health/config, auth session, project isolation, and billing entitlement", 
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-wix-bridge-secret": process.env.WIX_BRIDGE_SECRET
+      "x-wix-bridge-secret": process.env.DOORS_DRAWERS_BRIDGE_SECRET
     },
     body: JSON.stringify({
       email: "user-b@example.com",
