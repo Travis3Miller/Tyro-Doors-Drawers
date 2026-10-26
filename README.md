@@ -72,6 +72,7 @@ Required for production:
 - `BILLING_WEBHOOK_SECRET`
 - `WIX_CLIENT_ID`
 - `WIX_CLIENT_SECRET`
+- `WIX_BRIDGE_SECRET` (shared only between Render and Wix backend code; never expose it to page code)
 - `WIX_OAUTH_REDIRECT_URI`
 - `WIX_SITE_ID`
 - `WIX_UPGRADE_URL`
@@ -112,38 +113,87 @@ Without `DATABASE_URL`, user/account/project/preset data falls back to local JSO
 - `DATABASE_URL` wiring from that database
 - secret env var placeholders for identity/billing/session config
 
-## Welcome banner from the Wix member
+## Wix member sessions and private saved projects
 
-When the app is embedded in your Wix site, the page can pass the logged-in member's name to it (no separate sign-in).
-Add your site origin(s) to `wixParentOrigins` in `config.js`, then add this Velo code to the Wix page with the app's HTML iframe (`#html1`):
+The embedded app needs a backend-authenticated member session to save projects. Do not send a member ID, `paid` flag, or shared secret from browser code as proof of identity or entitlement. Instead, have a Wix backend web method obtain the signed-in member and call Render with a secret stored in Wix Secrets Manager. Render creates the member account, verifies paid access using Wix and `WIX_PAID_PLAN_IDS`, and returns a short-lived app token. Project APIs use that token and continue to scope records to the authenticated user.
+
+1. In Render, set `WIX_BRIDGE_SECRET` to a newly generated, long random value.
+2. In Wix Secrets Manager, create a secret also named `WIX_BRIDGE_SECRET` with the same value. Never place this value in Wix page code.
+3. Add this as `backend/wixBridge.web.js` in Wix. Replace the URL only if your Render service URL differs.
 
 ```js
-import { currentMember } from "wix-members-frontend";
-import { orders } from "wix-pricing-plans-frontend";
+import { currentMember } from "wix-members-backend";
+import { Permissions, webMethod } from "wix-web-module";
+import { getSecret } from "wix-secrets-backend";
+import { fetch } from "wix-fetch";
 
-// Plan IDs of the paid/extended version (same IDs as WIX_PAID_PLAN_IDS on the server)
-const PAID_PLAN_IDS = ["YOUR-PLAN-ID"];
+const RENDER_URL = "https://tyro-doors-drawers.onrender.com";
 
-$w.onReady(() => {
-  const isPaid = async () => {
-    try {
-      const list = await orders.listCurrentMemberOrders();
-      return list.some((o) => o.status === "ACTIVE"
-        && PAID_PLAN_IDS.map((p) => p.toUpperCase()).includes(String(o.planId).toUpperCase()));
-    } catch (e) {
-      return false;
-    }
-  };
-  const send = async () => {
-    const m = await currentMember.getMember({ fieldsets: ["FULL"] });
-    if (!m) return;
-    const name = (m.contactDetails && m.contactDetails.firstName)
-      || (m.profile && m.profile.nickname) || "";
-    if (name) $w("#html1").postMessage({ type: "wix-member", name, paid: await isPaid() });
-  };
-  $w("#html1").onMessage((e) => {
-    if (e.data && e.data.type === "cutlister-ready") send();
+export const getCutlisterSession = webMethod(Permissions.SiteMember, async () => {
+  const member = await currentMember.getMember({ fieldsets: ["FULL"] });
+  if (!member) {
+    throw new Error("Sign in to your Wix member account.");
+  }
+
+  const profile = member.profile || {};
+  const contact = member.contactDetails || {};
+  const memberId = member._id || member.id || "";
+  const email = member.loginEmail || member.email || profile.email || "";
+  const name = profile.nickname || profile.displayName
+    || [contact.firstName, contact.lastName].filter(Boolean).join(" ");
+  if (!memberId || !email) {
+    throw new Error("Wix did not return the member ID and email.");
+  }
+
+  const bridgeSecret = await getSecret("WIX_BRIDGE_SECRET");
+  const response = await fetch(`${RENDER_URL}/api/auth/wix/bridge`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-wix-bridge-secret": bridgeSecret
+    },
+    body: JSON.stringify({ externalMemberId: memberId, email, name })
   });
-  send();
+  if (!response.ok) {
+    throw new Error("Could not establish the app session.");
+  }
+  return response.json();
 });
 ```
+
+4. Replace the Wix page's current member-message code with this. The HTML component ID must be `html1`.
+
+```js
+import { getCutlisterSession } from "backend/wixBridge.web";
+
+let sending = false;
+
+$w.onReady(() => {
+  const sendSession = async () => {
+    if (sending) return;
+    sending = true;
+    try {
+      const session = await getCutlisterSession();
+      $w("#html1").postMessage({
+        type: "wix-member",
+        name: session.user.name || "",
+        paid: session.paid === true,
+        userId: session.user.id,
+        sessionToken: session.sessionToken
+      });
+    } catch (_error) {
+      $w("#html1").postMessage({ type: "wix-member-logout" });
+    } finally {
+      sending = false;
+    }
+  };
+
+  $w("#html1").onMessage((event) => {
+    if (event.data && event.data.type === "cutlister-ready") sendSession();
+  });
+  sendSession();
+  setInterval(sendSession, 15 * 60 * 1000);
+});
+```
+
+Publish the Wix site after installing both pieces. The Wix backend refreshes the app token periodically; the token is sent only to the iframe and held in its memory. The app server independently checks the member's current order before every save/customization write; the message's `paid` value only controls display. Keep the Wix origin in Render's `CORS_ORIGINS` and in `wixParentOrigins` in `config.js`.

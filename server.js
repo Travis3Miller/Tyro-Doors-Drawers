@@ -1252,59 +1252,68 @@ function createApp(options = {}) {
         user: userSummary(user),
         plan: resolvePlanForUser(user)
       });
-
-      app.post("/api/auth/wix/bridge", authRateLimiter, async (req, res) => {
-        try {
-          await userStoreReady;
-          if (!wixBridgeTrusted(req)) {
-            res.status(401).json({ error: "Untrusted Wix bridge request." });
-            return;
-          }
-
-          const source = req.body && typeof req.body === "object" ? req.body : {};
-          const identity = {
-            email: typeof source.email === "string" ? source.email : "",
-            name: typeof source.name === "string" ? source.name.slice(0, 100) : "",
-            externalMemberId: typeof source.externalMemberId === "string"
-              ? source.externalMemberId.trim().slice(0, 200)
-              : ""
-          };
-          if (!identity.externalMemberId) {
-            res.status(400).json({ error: "Wix member ID is required." });
-            return;
-          }
-
-          let user = await userStore.upsertUserFromIdentity(identity);
-          const access = await evaluateSaveAccessForUser(user, userStore, wixFetch, wixClientTokenCache);
-          if (access.user) {
-            user = access.user;
-          }
-
-          const sessionToken = createSessionToken(
-            { userId: user.id, exp: Date.now() + WIX_BRIDGE_SESSION_TTL_MS },
-            sessionSecret
-          );
-          res.json({
-            authenticated: true,
-            user: userSummary(user),
-            plan: access.allowed ? "pro" : "free",
-            paid: access.allowed,
-            sessionToken
-          });
-        } catch (err) {
-          if (err && /Conflicting identity match/i.test(err.message)) {
-            res.status(409).json({ error: "Conflicting Wix member identity." });
-            return;
-          }
-          res.status(503).json({ error: "Could not establish Wix member session." });
-        }
-      });
     } catch (err) {
       if (err && /Conflicting identity match/i.test(err.message)) {
         res.status(409).json({ error: "Conflicting identity payload." });
         return;
       }
       res.status(500).json({ error: "Could not complete sign in." });
+    }
+  });
+
+  app.post("/api/auth/wix/bridge", authRateLimiter, async (req, res) => {
+    try {
+      await userStoreReady;
+      if (!wixBridgeTrusted(req)) {
+        res.status(401).json({ error: "Untrusted Wix bridge request." });
+        return;
+      }
+
+      const source = req.body && typeof req.body === "object" ? req.body : {};
+      const identity = {
+        email: typeof source.email === "string" ? source.email : "",
+        name: typeof source.name === "string" ? source.name.slice(0, 100) : "",
+        externalMemberId: typeof source.externalMemberId === "string"
+          ? source.externalMemberId.trim().slice(0, 200)
+          : ""
+      };
+      if (!identity.externalMemberId) {
+        res.status(400).json({ error: "Wix member ID is required." });
+        return;
+      }
+
+      let user = await userStore.upsertUserFromIdentity(identity);
+      const access = await evaluateSaveAccessForUser(user, userStore, wixFetch, wixClientTokenCache);
+      if (access.user) {
+        user = access.user;
+      } else if (!access.allowed) {
+        user = await userStore.updateUserBilling({
+          userId: user.id,
+          email: user.email,
+          externalMemberId: user.externalMemberId,
+          externalCustomerId: user.externalCustomerId,
+          plan: "free",
+          subscriptionStatus: "inactive"
+        }) || user;
+      }
+
+      const sessionToken = createSessionToken(
+        { userId: user.id, exp: Date.now() + WIX_BRIDGE_SESSION_TTL_MS },
+        sessionSecret
+      );
+      res.json({
+        authenticated: true,
+        user: userSummary(user),
+        plan: access.allowed ? "pro" : "free",
+        paid: access.allowed,
+        sessionToken
+      });
+    } catch (err) {
+      if (err && /Conflicting identity match/i.test(err.message)) {
+        res.status(409).json({ error: "Conflicting Wix member identity." });
+        return;
+      }
+      res.status(503).json({ error: "Could not establish Wix member session." });
     }
   });
 
