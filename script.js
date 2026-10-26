@@ -677,6 +677,42 @@ function listenForWixMember() {
   }
 }
 
+function requestFreshWixSession(timeoutMs = 3000) {
+  if (!WIX_PARENT_ORIGINS.length || !window.parent || window.parent === window) {
+    return Promise.resolve(false);
+  }
+  const previous = wixSessionToken;
+  WIX_PARENT_ORIGINS.forEach((origin) => {
+    window.parent.postMessage({ type: "cutlister-ready" }, origin);
+  });
+  return new Promise((resolve) => {
+    const started = Date.now();
+    const timer = setInterval(() => {
+      if (wixSessionToken && wixSessionToken !== previous) {
+        clearInterval(timer);
+        resolve(true);
+      } else if (Date.now() - started > timeoutMs) {
+        clearInterval(timer);
+        resolve(false);
+      }
+    }, 100);
+  });
+}
+
+async function apiJsonWithReauth(path, options = {}) {
+  try {
+    return await apiJson(path, options);
+  } catch (err) {
+    if (!/authentication required/i.test(err && err.message || "")) {
+      throw err;
+    }
+    if (!(await requestFreshWixSession())) {
+      throw err;
+    }
+    return apiJson(path, options);
+  }
+}
+
 async function refreshWelcomeBanner() {
   const banner = byId("welcomeBanner");
   if (!banner) {
@@ -2005,7 +2041,10 @@ function calculateDrawerCutlist() {
 function reportSaveError(err) {
   const msg = err && err.message ? err.message : "Unknown error";
   if (/authentication required/i.test(msg)) {
-    alert("Not saved: you are not signed in. Please log in and try again.");
+    const detail = wixSessionToken
+      ? "The app server rejected your session token. Reload the page and try again."
+      : "The app did not receive a session from the Wix page. Check the Wix page code and wixParentOrigins.";
+    alert("Not saved: could not verify your sign-in. " + detail);
   } else if (/subscription/i.test(msg)) {
     alert("Not saved: saving requires an active paid plan.");
   } else {
@@ -2040,13 +2079,13 @@ async function saveProject() {
   try {
   if (await ensureDataMode() === "api") {
     if (existingId) {
-      await apiJson(`/api/projects/${existingId}`, {
+      await apiJsonWithReauth(`/api/projects/${existingId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, payload })
       });
     } else {
-      await apiJson("/api/projects", {
+      await apiJsonWithReauth("/api/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, payload })
