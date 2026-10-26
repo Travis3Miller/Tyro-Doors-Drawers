@@ -2002,6 +2002,17 @@ function calculateDrawerCutlist() {
   renderDrawerResults({ entries: allEntries, parts: aggregateParts(allParts) });
 }
 
+function reportSaveError(err) {
+  const msg = err && err.message ? err.message : "Unknown error";
+  if (/authentication required/i.test(msg)) {
+    alert("Not saved: you are not signed in. Please log in and try again.");
+  } else if (/subscription/i.test(msg)) {
+    alert("Not saved: saving requires an active paid plan.");
+  } else {
+    alert("Not saved: " + msg);
+  }
+}
+
 async function saveProject() {
   const name = byId("projectName").value.trim();
   if (!name) {
@@ -2026,6 +2037,7 @@ async function saveProject() {
 
   const existingId = byId("projectSelect").value;
 
+  try {
   if (await ensureDataMode() === "api") {
     if (existingId) {
       await apiJson(`/api/projects/${existingId}`, {
@@ -2052,9 +2064,18 @@ async function saveProject() {
     }
     saveLocalProjects(projects);
   }
+  } catch (err) {
+    reportSaveError(err);
+    return;
+  }
 
   await loadCatalog();
   await refreshUi();
+  const saved = state.projects.find((p) => p.name === name);
+  if (saved) {
+    byId("projectSelect").value = saved.id;
+  }
+  alert(`Project "${name}" saved.`);
 }
 
 function wireMeasurementInputs() {
@@ -2595,6 +2616,7 @@ async function deleteProject() {
 }
 
 async function addCatalogItem({ listKey, payload, apiPath }) {
+  try {
   if (await ensureDataMode() === "api") {
     await apiJson(apiPath, {
       method: "POST",
@@ -2606,12 +2628,17 @@ async function addCatalogItem({ listKey, payload, apiPath }) {
     catalog[listKey] = [...catalog[listKey], { id: Math.random().toString(36).slice(2, 10), ...payload }];
     saveLocalCatalog(catalog);
   }
+  } catch (err) {
+    reportSaveError(err);
+    return;
+  }
 
   await loadCatalog();
   await refreshUi();
 }
 
 async function deleteCatalogItem({ listKey, id, apiPath }) {
+  try {
   if (await ensureDataMode() === "api") {
     await apiJson(`${apiPath}/${id}`, { method: "DELETE" });
   } else {
@@ -2619,12 +2646,17 @@ async function deleteCatalogItem({ listKey, id, apiPath }) {
     catalog[listKey] = catalog[listKey].filter((item) => item.id !== id);
     saveLocalCatalog(catalog);
   }
+  } catch (err) {
+    reportSaveError(err);
+    return;
+  }
 
   await loadCatalog();
   await refreshUi();
 }
 
 async function updateCatalogItem({ listKey, id, payload, apiPath }) {
+  try {
   if (await ensureDataMode() === "api") {
     await apiJson(`${apiPath}/${id}`, {
       method: "PUT",
@@ -2635,6 +2667,10 @@ async function updateCatalogItem({ listKey, id, payload, apiPath }) {
     const catalog = localCatalog();
     catalog[listKey] = catalog[listKey].map((item) => (item.id === id ? { ...item, ...payload } : item));
     saveLocalCatalog(catalog);
+  }
+  } catch (err) {
+    reportSaveError(err);
+    return;
   }
 
   await loadCatalog();
