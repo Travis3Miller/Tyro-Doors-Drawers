@@ -12,6 +12,7 @@ const originalEnv = {
   BILLING_WEBHOOK_SECRET: process.env.BILLING_WEBHOOK_SECRET,
   WIX_CLIENT_ID: process.env.WIX_CLIENT_ID,
   WIX_CLIENT_SECRET: process.env.WIX_CLIENT_SECRET,
+  DOORS_DRAWERS_BRIDGE_SECRET: process.env.DOORS_DRAWERS_BRIDGE_SECRET,
   WIX_OAUTH_REDIRECT_URI: process.env.WIX_OAUTH_REDIRECT_URI,
   WIX_SITE_ID: process.env.WIX_SITE_ID,
   WIX_PAID_PLAN_IDS: process.env.WIX_PAID_PLAN_IDS,
@@ -48,6 +49,7 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   process.env.BILLING_WEBHOOK_SECRET = "billing-secret";
   process.env.WIX_CLIENT_ID = "wix-client-id";
   process.env.WIX_CLIENT_SECRET = "wix-client-secret";
+  process.env.DOORS_DRAWERS_BRIDGE_SECRET = "doors-drawers-bridge-secret";
   process.env.WIX_SITE_ID = "fd0e212b-a904-4916-88c2-7af87a48aa9b";
   process.env.WIX_PAID_PLAN_IDS = "plan-doors";
   process.env.USER_STORE_FILE = userStoreFile;
@@ -140,6 +142,7 @@ test("health/config, auth session, project isolation, and billing entitlement", 
     if (originalEnv.BILLING_WEBHOOK_SECRET === undefined) delete process.env.BILLING_WEBHOOK_SECRET; else process.env.BILLING_WEBHOOK_SECRET = originalEnv.BILLING_WEBHOOK_SECRET;
     if (originalEnv.WIX_CLIENT_ID === undefined) delete process.env.WIX_CLIENT_ID; else process.env.WIX_CLIENT_ID = originalEnv.WIX_CLIENT_ID;
     if (originalEnv.WIX_CLIENT_SECRET === undefined) delete process.env.WIX_CLIENT_SECRET; else process.env.WIX_CLIENT_SECRET = originalEnv.WIX_CLIENT_SECRET;
+    if (originalEnv.DOORS_DRAWERS_BRIDGE_SECRET === undefined) delete process.env.DOORS_DRAWERS_BRIDGE_SECRET; else process.env.DOORS_DRAWERS_BRIDGE_SECRET = originalEnv.DOORS_DRAWERS_BRIDGE_SECRET;
     if (originalEnv.WIX_OAUTH_REDIRECT_URI === undefined) delete process.env.WIX_OAUTH_REDIRECT_URI; else process.env.WIX_OAUTH_REDIRECT_URI = originalEnv.WIX_OAUTH_REDIRECT_URI;
     if (originalEnv.WIX_SITE_ID === undefined) delete process.env.WIX_SITE_ID; else process.env.WIX_SITE_ID = originalEnv.WIX_SITE_ID;
     if (originalEnv.WIX_PAID_PLAN_IDS === undefined) delete process.env.WIX_PAID_PLAN_IDS; else process.env.WIX_PAID_PLAN_IDS = originalEnv.WIX_PAID_PLAN_IDS;
@@ -430,6 +433,57 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   });
   assert.equal(createProjectRes.status, 201);
 
+  const invalidWixBridgeRes = await jsonRequest(baseUrl, "/api/auth/wix/bridge", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-wix-bridge-secret": "wrong-secret"
+    },
+    body: JSON.stringify({
+      email: "user-a@example.com",
+      externalMemberId: "member-a"
+    })
+  });
+  assert.equal(invalidWixBridgeRes.status, 401);
+
+  const wixBridgeARes = await jsonRequest(baseUrl, "/api/auth/wix/bridge", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-wix-bridge-secret": process.env.DOORS_DRAWERS_BRIDGE_SECRET
+    },
+    body: JSON.stringify({
+      email: "user-a@example.com",
+      name: "User A",
+      externalMemberId: "member-a",
+      plan: "pro",
+      subscriptionStatus: "active"
+    })
+  });
+  assert.equal(wixBridgeARes.status, 200);
+  const wixBridgeABody = await wixBridgeARes.json();
+  assert.equal(wixBridgeABody.authenticated, true);
+  assert.equal(wixBridgeABody.paid, true);
+  assert.equal(wixBridgeABody.plan, "pro");
+  assert.equal(typeof wixBridgeABody.sessionToken, "string");
+  const bearerProjectsARes = await jsonRequest(baseUrl, "/api/projects", {
+    headers: { authorization: "Bearer " + wixBridgeABody.sessionToken }
+  });
+  assert.equal(bearerProjectsARes.status, 200);
+  assert.equal((await bearerProjectsARes.json())[0].name, "A Project");
+  const bearerCreateProjectARes = await jsonRequest(baseUrl, "/api/projects", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: "Bearer " + wixBridgeABody.sessionToken
+    },
+    body: JSON.stringify({
+      name: "A Bridge Project",
+      payload: { doors: [{ width: 14 }] }
+    })
+  });
+  assert.equal(bearerCreateProjectARes.status, 201);
+
   const canSaveARes = await jsonRequest(baseUrl, "/api/can-save", {
     method: "POST",
     headers: {
@@ -463,14 +517,31 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   });
   assert.equal(ssoBRes.status, 200);
   const sessionCookieB = ssoBRes.headers.get("set-cookie");
+  const wixBridgeBRes = await jsonRequest(baseUrl, "/api/auth/wix/bridge", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-wix-bridge-secret": process.env.DOORS_DRAWERS_BRIDGE_SECRET
+    },
+    body: JSON.stringify({
+      email: "user-b@example.com",
+      name: "User B",
+      externalMemberId: "member-b",
+      plan: "pro",
+      subscriptionStatus: "active"
+    })
+  });
+  assert.equal(wixBridgeBRes.status, 200);
+  const wixBridgeBBody = await wixBridgeBRes.json();
+  assert.equal(wixBridgeBBody.paid, false);
 
   const projectsARes = await jsonRequest(baseUrl, "/api/projects", {
     headers: { cookie: sessionCookieA }
   });
   const projectsA = await projectsARes.json();
   assert.equal(projectsARes.status, 200);
-  assert.equal(projectsA.length, 1);
-  assert.equal(projectsA[0].name, "A Project");
+  assert.equal(projectsA.length, 2);
+  assert.deepEqual(projectsA.map((project) => project.name).sort(), ["A Bridge Project", "A Project"]);
 
   const projectsBRes = await jsonRequest(baseUrl, "/api/projects", {
     headers: { cookie: sessionCookieB }
@@ -478,6 +549,11 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   const projectsB = await projectsBRes.json();
   assert.equal(projectsBRes.status, 200);
   assert.equal(projectsB.length, 0);
+  const bearerProjectsBRes = await jsonRequest(baseUrl, "/api/projects", {
+    headers: { authorization: "Bearer " + wixBridgeBBody.sessionToken }
+  });
+  assert.equal(bearerProjectsBRes.status, 200);
+  assert.equal((await bearerProjectsBRes.json()).length, 0);
 
   const canSaveBRes = await jsonRequest(baseUrl, "/api/can-save", {
     method: "POST",
@@ -503,6 +579,18 @@ test("health/config, auth session, project isolation, and billing entitlement", 
     })
   });
   assert.equal(createProjectBRes.status, 403);
+  const bearerProjectCreateBRes = await jsonRequest(baseUrl, "/api/projects", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: "Bearer " + wixBridgeBBody.sessionToken
+    },
+    body: JSON.stringify({
+      name: "B Project",
+      payload: { doors: [{ width: 10 }] }
+    })
+  });
+  assert.equal(bearerProjectCreateBRes.status, 403);
 
   const billingRes = await jsonRequest(baseUrl, "/api/billing/webhook", {
     method: "POST",

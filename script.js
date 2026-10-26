@@ -74,6 +74,9 @@ function assetUrl(assetName) {
 async function apiFetch(path, options = {}) {
   const headers = new Headers(options.headers || {});
   headers.set("x-user-id", getClientUserId());
+  if (wixSessionToken) {
+    headers.set("Authorization", "Bearer " + wixSessionToken);
+  }
   const requestOptions = { ...options, headers };
   if (!requestOptions.credentials) {
     requestOptions.credentials = "include";
@@ -607,6 +610,8 @@ const WIX_PARENT_ORIGINS = Array.isArray(FRONTEND_CONFIG.wixParentOrigins)
   : [];
 let wixMemberName = "";
 let wixMemberPaid = false;
+let wixSessionToken = "";
+let wixBackendUserId = "";
 
 function setWelcomeName(rawName, paid = wixMemberPaid) {
   const banner = byId("welcomeBanner");
@@ -632,12 +637,38 @@ function listenForWixMember() {
       return;
     }
     const data = event.data;
-    if (!data || data.type !== "wix-member" || typeof data.name !== "string") {
+    if (!data) {
       return;
     }
+    if (data.type === "wix-member-logout") {
+      wixSessionToken = "";
+      wixBackendUserId = "";
+      wixMemberName = "";
+      wixMemberPaid = false;
+      state.dataMode = "unknown";
+      loadCatalog().then(async () => {
+        await refreshUi();
+        await refreshWelcomeBanner();
+      }).catch(() => {});
+      return;
+    }
+    if (data.type !== "wix-member" || typeof data.name !== "string") {
+      return;
+    }
+
     wixMemberName = data.name.slice(0, 100);
     wixMemberPaid = data.paid === true;
     setWelcomeName(wixMemberName);
+    if (typeof data.sessionToken === "string" && data.sessionToken) {
+      wixSessionToken = data.sessionToken;
+      const nextUserId = typeof data.userId === "string" ? data.userId : "";
+      if (nextUserId !== wixBackendUserId) {
+        wixBackendUserId = nextUserId;
+        state.dataMode = "unknown";
+        loadCatalog().then(refreshUi).catch(() => {});
+      }
+      refreshWelcomeBanner();
+    }
   });
   if (window.parent && window.parent !== window) {
     WIX_PARENT_ORIGINS.forEach((origin) => {
