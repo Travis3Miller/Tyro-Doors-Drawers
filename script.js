@@ -2038,24 +2038,40 @@ function calculateDrawerCutlist() {
   renderDrawerResults({ entries: allEntries, parts: aggregateParts(allParts) });
 }
 
+function showAppMessage(title, message) {
+  const dialog = byId("appMessageDialog");
+  if (!dialog || typeof dialog.showModal !== "function") {
+    alert(`${title}\n\n${message}`);
+    return;
+  }
+  byId("appMessageTitle").textContent = title;
+  byId("appMessageBody").textContent = message;
+  if (!dialog.open) {
+    dialog.showModal();
+  }
+}
+
 function reportSaveError(err) {
   const msg = err && err.message ? err.message : "Unknown error";
   if (/authentication required/i.test(msg)) {
     const detail = wixSessionToken
       ? "The app server rejected your session token. Reload the page and try again."
       : "The app did not receive a session from the Wix page. Check the Wix page code and wixParentOrigins.";
-    alert("Not saved: could not verify your sign-in. " + detail);
+    showAppMessage("Not saved", "Tyro Technologies could not verify your sign-in. " + detail);
   } else if (/subscription/i.test(msg)) {
-    alert("Not saved: saving requires an active paid plan.");
+    showAppMessage(
+      "Extended Version required",
+      "Saving projects and custom door or drawer presets is part of the Extended Version. Please purchase or activate a paid plan to save your work."
+    );
   } else {
-    alert("Not saved: " + msg);
+    showAppMessage("Not saved", msg);
   }
 }
 
 async function saveProject() {
   const name = byId("projectName").value.trim();
   if (!name) {
-    alert("Project name is required.");
+    showAppMessage("Project name required", "Enter a project name before saving.");
     return;
   }
 
@@ -2114,7 +2130,7 @@ async function saveProject() {
   if (saved) {
     byId("projectSelect").value = saved.id;
   }
-  alert(`Project "${name}" saved.`);
+  showAppMessage("Project saved", `Project "${name}" was saved.`);
 }
 
 function wireMeasurementInputs() {
@@ -3466,6 +3482,7 @@ function wireButtons() {
   });
 
   byId("saveProjectBtn").addEventListener("click", saveProject);
+  byId("appMessageCloseBtn").addEventListener("click", () => byId("appMessageDialog").close());
   byId("loadProjectBtn").addEventListener("click", loadProject);
   byId("deleteProjectBtn").addEventListener("click", deleteProject);
 
