@@ -270,7 +270,7 @@
                 <input id="oversizeAmount" type="text" inputmode="decimal" data-measure="true" value="0.125">
               </label>
               <button id="addDoorStyleBtn" type="button">Create Door Style</button>
-              <p class="help compact">Panel height uses $door\_height - 2(rail\_width - stick\_depth)$.</p>
+              <p class="help compact">Panel clearance is applied on each side. Mitered rails match the stile width. Oversize adds half the amount to each frame width for trimming.</p>
             </div>
             <div class="input-group">
               <h3 id="doorReferenceTitle">Cope N Stick Reference</h3>
@@ -690,6 +690,59 @@
       </div>
     </section>
   </main>
+
+  <dialog id="editDoorStyleDialog" class="app-message-dialog door-style-dialog" aria-labelledby="editDoorStyleTitle">
+    <form id="editDoorStyleForm" class="app-message-content">
+      <h2 id="editDoorStyleTitle">Edit Door Style</h2>
+      <label>Door Name
+        <input id="editDoorName" type="text" required>
+      </label>
+      <label>Joint Type
+        <select id="editDoorJointType">
+          <option value="copeStick">Cope &amp; Stick</option>
+          <option value="mitered">Mitered</option>
+        </select>
+      </label>
+      <div class="form-row">
+        <label>Stile Width
+          <input id="editDoorStileWidth" type="text" inputmode="decimal" required>
+        </label>
+        <label id="editDoorMatchWrap">Match Rails to Stiles?
+          <select id="editDoorMatch"><option value="yes">Yes</option><option value="no">No</option></select>
+        </label>
+      </div>
+      <div id="editDoorRailsWrap" class="form-row">
+        <label>Bottom Rail Width
+          <input id="editDoorRailWidth" type="text" inputmode="decimal">
+        </label>
+        <label>Top Rail Width
+          <input id="editDoorTopRailWidth" type="text" inputmode="decimal">
+        </label>
+      </div>
+      <div class="form-row">
+        <label>Groove Depth
+          <input id="editDoorGrooveDepth" type="text" inputmode="decimal" required>
+        </label>
+        <label>Panel Clearance
+          <input id="editDoorPanelClearance" type="text" inputmode="decimal" required>
+        </label>
+      </div>
+      <p class="help compact">Panel clearance is applied on each side. Mitered rails match the stile width. Oversize adds half the amount to each frame width for trimming.</p>
+      <div class="form-row">
+        <label>Oversize Doors?
+          <select id="editDoorOversize"><option value="no">No</option><option value="yes">Yes</option></select>
+        </label>
+        <label id="editDoorOversizeWrap">Oversize Amount
+          <input id="editDoorOversizeAmount" type="text" inputmode="decimal">
+        </label>
+      </div>
+      <p id="editDoorStyleError" class="door-style-error" role="alert"></p>
+      <div class="door-style-actions">
+        <button id="editDoorStyleSave" type="submit">Save</button>
+        <button id="editDoorStyleCancel" type="button" class="secondary">Cancel</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog id="appMessageDialog" class="app-message-dialog" aria-labelledby="appMessageTitle" aria-describedby="appMessageBody">
     <div class="app-message-content">

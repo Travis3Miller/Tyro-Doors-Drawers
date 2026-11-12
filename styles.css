@@ -753,6 +753,31 @@ button.danger:hover {
   background: rgba(0, 0, 0, 0.48);
 }
 
+.door-style-dialog {
+  width: min(600px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+}
+
+.door-style-dialog form {
+  display: grid;
+  gap: 10px;
+}
+
+.door-style-error {
+  color: #a32222;
+  margin: 0;
+}
+
+.door-style-error:empty {
+  display: none;
+}
+
+.door-style-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .app-message-content {
   padding: 24px;
 }

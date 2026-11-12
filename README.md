@@ -17,6 +17,10 @@ Node + Express API and static frontend for the cutlister app.
 - `GET/POST/PUT/DELETE /api/presets` are auth-required and user-scoped.
 - Save/customize writes (projects, presets, settings, catalog edits) require active paid entitlement.
 
+Door calculations use the selected style's stile and rail widths, groove depth, and panel clearance. Panel clearance is per side: twice the entered clearance is subtracted from each panel dimension. Cope-and-stick rails run between the stiles, with their length equal to door width minus twice the stile width plus twice the groove depth; panel height accounts for the individual top and bottom rail widths. For mitered doors, stiles and rails have the same width and their lengths are measured at the outside of the frame: stiles equal door height and rails equal door width.
+
+Oversize increases both overall door dimensions by the entered amount and each stile and rail width by half that amount, leaving the panel and cope-and-stick rail lengths unchanged. For example, 1/8 inch oversize increases a 2 1/4 inch frame width to 2 5/16 inches for trimming after assembly. Existing cope-and-stick styles now apply clearance on all four panel edges, so their panel dimensions may differ from earlier cutlists.
+
 ## Identity exchange flow
 
 Your website backend should send JSON identity payloads to `POST /api/auth/sso` with:

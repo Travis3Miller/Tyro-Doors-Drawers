@@ -1389,10 +1389,19 @@ function doorPartsForSize({ width, height, style, qty }) {
   const stileWidth = style.stileWidth + ripOversize;
   const bottomRailWidth = baseRailWidth + ripOversize;
   const topRailWidthAdj = topRailWidth + ripOversize;
+  if (style.jointType === "mitered") {
+    const panelWidth = adjustedWidth - 2 * stileWidth + 2 * grooveDepth - 2 * style.panelClearance;
+    const panelHeight = adjustedHeight - 2 * stileWidth + 2 * grooveDepth - 2 * style.panelClearance;
+    return [
+      { label: "Stile", length: adjustedHeight, width: stileWidth, qty: 2 * qty },
+      { label: "Rail", length: adjustedWidth, width: stileWidth, qty: 2 * qty },
+      { label: "Panel", length: panelHeight, width: panelWidth, qty }
+    ];
+  }
   const jointDepth = grooveDepth;
   const railLength = adjustedWidth - 2 * stileWidth + 2 * jointDepth;
-  const panelWidth = railLength - style.panelClearance;
-  const panelHeight = adjustedHeight - (topRailWidthAdj - grooveDepth) - (bottomRailWidth - grooveDepth);
+  const panelWidth = railLength - 2 * style.panelClearance;
+  const panelHeight = adjustedHeight - (topRailWidthAdj - grooveDepth) - (bottomRailWidth - grooveDepth) - 2 * style.panelClearance;
   const railsMatch = Math.abs(topRailWidthAdj - bottomRailWidth) < 1e-6;
   const rails = railsMatch
     ? [{ label: "Rail", length: railLength, width: bottomRailWidth, qty: 2 * qty }]
@@ -2729,105 +2738,80 @@ async function updateCatalogItem({ listKey, id, payload, apiPath }) {
     });
   } catch (err) {
     reportSaveError(err);
-    return;
+    return false;
   }
 
   await refreshAfterSave();
+  return true;
 }
 
-async function editDoorStyle(id) {
+let editingDoorStyleId = "";
+
+function updateEditDoorStyleVisibility() {
+  const mitered = byId("editDoorJointType").value === "mitered";
+  const match = byId("editDoorMatch");
+  byId("editDoorMatchWrap").classList.toggle("hidden", mitered);
+  byId("editDoorRailsWrap").classList.toggle("hidden", mitered || match.value === "yes");
+  byId("editDoorOversizeWrap").classList.toggle("hidden", byId("editDoorOversize").value !== "yes");
+}
+
+function editDoorStyle(id) {
   const style = state.catalog.doorStyles.find((item) => item.id === id);
   if (!style) {
     return;
   }
 
-  const name = prompt("Style name", style.name);
-  if (!name) {
-    return;
-  }
+  editingDoorStyleId = id;
+  byId("editDoorName").value = style.name;
+  byId("editDoorJointType").value = style.jointType === "mitered" ? "mitered" : "copeStick";
+  byId("editDoorStileWidth").value = String(style.stileWidth);
+  byId("editDoorMatch").value = style.matchRailsToStiles ? "yes" : "no";
+  byId("editDoorRailWidth").value = String(style.railWidth);
+  byId("editDoorTopRailWidth").value = String(style.customTopRail ? style.topRailWidth : style.railWidth);
+  byId("editDoorGrooveDepth").value = String(style.grooveDepth ?? style.stickDepth ?? style.copeDepth);
+  byId("editDoorPanelClearance").value = String(style.panelClearance);
+  byId("editDoorOversize").value = style.oversizeEnabled ? "yes" : "no";
+  byId("editDoorOversizeAmount").value = String(style.oversizeAmount ?? 0.125);
+  byId("editDoorStyleError").textContent = "";
+  updateEditDoorStyleVisibility();
+  byId("editDoorStyleDialog").showModal();
+}
 
-  const jointType = prompt("Joint type (copeStick or mitered)", style.jointType || "copeStick");
-  if (!jointType) {
+async function saveEditedDoorStyle(event) {
+  event.preventDefault();
+  const jointType = byId("editDoorJointType").value;
+  const matchRails = jointType === "mitered" || byId("editDoorMatch").value === "yes";
+  const oversizeEnabled = byId("editDoorOversize").value === "yes";
+  const stileWidth = parseMeasurement(byId("editDoorStileWidth").value);
+  const railWidth = matchRails ? stileWidth : parseMeasurement(byId("editDoorRailWidth").value);
+  const topRailWidth = matchRails ? stileWidth : parseMeasurement(byId("editDoorTopRailWidth").value);
+  const grooveDepth = parseMeasurement(byId("editDoorGrooveDepth").value);
+  const panelClearance = parseMeasurement(byId("editDoorPanelClearance").value);
+  const oversizeAmount = parseMeasurement(byId("editDoorOversizeAmount").value);
+  const name = byId("editDoorName").value.trim();
+  const measurements = [stileWidth, railWidth, topRailWidth, grooveDepth, panelClearance];
+  if (!name || measurements.some((value) => !Number.isFinite(value)) ||
+      stileWidth <= 0 || railWidth <= 0 || topRailWidth <= 0 ||
+      grooveDepth < 0 || panelClearance < 0 ||
+      (oversizeEnabled && (!Number.isFinite(oversizeAmount) || oversizeAmount < 0))) {
+    byId("editDoorStyleError").textContent = "Enter a name, positive widths, and valid non-negative groove, clearance, and oversize measurements.";
     return;
   }
-
-  const stileWidth = prompt("Stile width (X)", formatMeasurement(style.stileWidth));
-  if (stileWidth === null) {
-    return;
-  }
-  const matchRailsToStiles = prompt("Match rails to stiles? (yes/no)", style.matchRailsToStiles ? "yes" : "no");
-  if (matchRailsToStiles === null) {
-    return;
-  }
-  const railWidth = prompt("Bottom rail width (X)", formatMeasurement(style.railWidth));
-  if (railWidth === null) {
-    return;
-  }
-  const matchRails = String(matchRailsToStiles).toLowerCase().startsWith("y");
-  let customTopRail = "no";
-  let topRailWidth = formatMeasurement(style.topRailWidth || style.railWidth);
-  if (!matchRails) {
-    customTopRail = prompt("Use custom top rail? (yes/no)", style.customTopRail ? "yes" : "no");
-    if (customTopRail === null) {
-      return;
-    }
-    topRailWidth = prompt("Top rail width (X)", formatMeasurement(style.topRailWidth || style.railWidth));
-    if (topRailWidth === null) {
-      return;
-    }
-  }
-  const grooveDepth = prompt("Groove depth (Y)", formatMeasurement(style.grooveDepth || style.stickDepth || style.copeDepth));
-  if (grooveDepth === null) {
-    return;
-  }
-  const panelClearance = prompt("Panel clearance (Z)", formatMeasurement(style.panelClearance));
-  if (panelClearance === null) {
-    return;
-  }
-  const oversizeEnabled = prompt("Oversize doors? (yes/no)", style.oversizeEnabled ? "yes" : "no");
-  if (oversizeEnabled === null) {
-    return;
-  }
-  const oversizeAmount = prompt("Oversize amount", formatMeasurement(style.oversizeAmount || 0.125));
-  if (oversizeAmount === null) {
-    return;
-  }
-
   const updates = {
-    name: name.trim(),
-    jointType: jointType === "mitered" ? "mitered" : "copeStick",
-    stileWidth: parseMeasurement(stileWidth),
-    railWidth: parseMeasurement(railWidth),
-    grooveDepth: parseMeasurement(grooveDepth),
-    copeDepth: parseMeasurement(grooveDepth),
-    stickDepth: parseMeasurement(grooveDepth),
-    panelClearance: parseMeasurement(panelClearance),
-    matchRailsToStiles: matchRails,
-    customTopRail: matchRails ? false : String(customTopRail).toLowerCase().startsWith("y"),
-    topRailWidth: parseMeasurement(topRailWidth),
-    oversizeEnabled: String(oversizeEnabled).toLowerCase().startsWith("y"),
-    oversizeAmount: parseMeasurement(oversizeAmount)
+    name, jointType, stileWidth, railWidth, topRailWidth, grooveDepth,
+    copeDepth: grooveDepth, stickDepth: grooveDepth, panelClearance,
+    matchRailsToStiles: matchRails, customTopRail: !matchRails && topRailWidth !== railWidth,
+    oversizeEnabled, oversizeAmount: Number.isFinite(oversizeAmount) ? oversizeAmount : 0
   };
-
-  if (updates.jointType === "mitered") {
-    updates.matchRailsToStiles = true;
-    updates.customTopRail = false;
+  const saveButton = byId("editDoorStyleSave");
+  saveButton.disabled = true;
+  try {
+    if (await updateCatalogItem({ listKey: "doorStyles", id: editingDoorStyleId, payload: updates, apiPath: "/api/door-styles" })) {
+      byId("editDoorStyleDialog").close();
+    }
+  } finally {
+    saveButton.disabled = false;
   }
-
-  if (updates.matchRailsToStiles) {
-    updates.railWidth = updates.stileWidth;
-  }
-
-  if (!updates.customTopRail) {
-    updates.topRailWidth = updates.railWidth;
-  }
-
-  if (!Number.isFinite(updates.stileWidth) || !Number.isFinite(updates.railWidth)) {
-    alert("Enter valid numeric sizes.");
-    return;
-  }
-
-  await updateCatalogItem({ listKey: "doorStyles", id, payload: updates, apiPath: "/api/door-styles" });
 }
 
 async function editOverlay(id) {
@@ -3486,6 +3470,11 @@ function wireButtons() {
 
   byId("saveProjectBtn").addEventListener("click", saveProject);
   byId("appMessageCloseBtn").addEventListener("click", () => byId("appMessageDialog").close());
+  byId("editDoorStyleForm").addEventListener("submit", saveEditedDoorStyle);
+  byId("editDoorStyleCancel").addEventListener("click", () => byId("editDoorStyleDialog").close());
+  ["editDoorJointType", "editDoorMatch", "editDoorOversize"].forEach((id) => {
+    byId(id).addEventListener("change", updateEditDoorStyleVisibility);
+  });
   byId("loadProjectBtn").addEventListener("click", loadProject);
   byId("deleteProjectBtn").addEventListener("click", deleteProject);
 
@@ -3523,6 +3512,15 @@ function wireButtons() {
 
     if (!payload.customTopRail) {
       payload.topRailWidth = payload.railWidth;
+    }
+
+    const measurements = [payload.stileWidth, payload.railWidth, payload.topRailWidth, payload.grooveDepth, payload.panelClearance];
+    if (measurements.some((value) => !Number.isFinite(value)) ||
+        payload.stileWidth <= 0 || payload.railWidth <= 0 || payload.topRailWidth <= 0 ||
+        payload.grooveDepth < 0 || payload.panelClearance < 0 ||
+        (payload.oversizeEnabled && (!Number.isFinite(payload.oversizeAmount) || payload.oversizeAmount < 0))) {
+      showAppMessage("Invalid door style", "Enter positive widths and valid non-negative groove, clearance, and oversize measurements.");
+      return;
     }
 
     addCatalogItem({ listKey: "doorStyles", payload, apiPath: "/api/door-styles" });
