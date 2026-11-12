@@ -617,6 +617,7 @@
                         <input id="newButtGrooveBack" type="checkbox">
                         Groove Back
                       </label>
+                      <p class="help compact groove-help">Checked parts stay the full drawer height. Unchecked parts are raised above the bottom: their cut width is the drawer height minus the groove height and bottom thickness. Example: 4&quot; - 1/4&quot; - 1/4&quot; = 3 1/2&quot;.</p>
                     </div>
                   </div>
                   <div class="wizard-step hidden" data-step="4">
@@ -741,6 +742,70 @@
         <button id="editDoorStyleSave" type="submit">Save</button>
         <button id="editDoorStyleCancel" type="button" class="secondary">Cancel</button>
       </div>
+    </form>
+  </dialog>
+
+  <dialog id="editConstructionDialog" class="app-message-dialog door-style-dialog" aria-labelledby="editConstructionTitle">
+    <form id="editConstructionForm" class="app-message-content" novalidate>
+      <h2 id="editConstructionTitle">Edit Drawer Construction</h2>
+      <label>Construction Name <input id="editConstructionName" type="text"></label>
+      <label>Construction Type
+        <select id="editConstructionType">
+          <option value="butt">Butt Joint</option><option value="lock">Lock Joint</option>
+          <option value="dovetail">Dovetail</option><option value="custom">Custom</option>
+        </select>
+      </label>
+      <div class="form-row">
+        <label>Side Thickness (in) <input id="editConstructionSideThickness" type="text" inputmode="decimal"></label>
+        <label id="editConstructionFrontBackWrap">Front/Back Thickness (in) <input id="editConstructionFrontBackThickness" type="text" inputmode="decimal"></label>
+        <label>Bottom Thickness (in) <input id="editConstructionBottomThickness" type="text" inputmode="decimal"></label>
+      </div>
+      <div id="editConstructionButt" class="form-row">
+        <label>Sides Run <select id="editConstructionButtSideRun"><option value="length">Long Sides (front/back between)</option><option value="between">Long Front/Back (sides between)</option></select></label>
+        <label>Bottom Placement <select id="editConstructionButtBottomPlacement"><option value="grooved">Grooved</option><option value="planted">Planted on Bottom</option></select></label>
+      </div>
+      <div id="editConstructionGroove" class="form-row">
+        <label>Groove Depth (in) <input id="editConstructionButtGrooveDepth" type="text" inputmode="decimal"></label>
+        <label>Groove Height from Bottom (in) <input id="editConstructionButtGrooveHeight" type="text" inputmode="decimal"></label>
+        <label class="inline-check"><input id="editConstructionButtGrooveSides" type="checkbox"> Groove Sides</label>
+        <label class="inline-check"><input id="editConstructionButtGrooveFront" type="checkbox"> Groove Front</label>
+        <label class="inline-check"><input id="editConstructionButtGrooveBack" type="checkbox"> Groove Back</label>
+        <p class="help compact groove-help">Checked parts stay the full drawer height. Unchecked parts are raised above the bottom: their cut width is the drawer height minus the groove height and bottom thickness. Example: 4&quot; - 1/4&quot; - 1/4&quot; = 3 1/2&quot;.</p>
+      </div>
+      <label id="editConstructionIncludedWrap" class="inline-check"><input id="editConstructionBottomThicknessIncluded" type="checkbox"> Bottom thickness included in drawer height</label>
+      <div id="editConstructionLock" class="form-row">
+        <label>Sides Run <select id="editConstructionLockSideRun"><option value="length">Long Sides (front/back between)</option><option value="between">Long Front/Back (sides between)</option></select></label>
+        <label>Dado Depth (in) <input id="editConstructionLockDadoDepth" type="text" inputmode="decimal"></label>
+        <label>Bottom Inset per Side (in) <input id="editConstructionBottomInset" type="text" inputmode="decimal"></label>
+      </div>
+      <div id="editConstructionDovetail">
+        <label>Dovetail Mode <select id="editConstructionDovetailMode"><option value="through">Through</option><option value="setback">Side Setback</option></select></label>
+        <div id="editConstructionSetbacks" class="form-row">
+          <label class="inline-check"><input id="editConstructionDovetailFrontSetbackEnabled" type="checkbox"> Front Setback</label>
+          <label id="editConstructionFrontSetbackWrap">Front Setback (in) <input id="editConstructionDovetailFrontSetback" type="text" inputmode="decimal"></label>
+          <label class="inline-check"><input id="editConstructionDovetailBackSetbackEnabled" type="checkbox"> Back Setback</label>
+          <label id="editConstructionBackSetbackWrap">Back Setback (in) <input id="editConstructionDovetailBackSetback" type="text" inputmode="decimal"></label>
+        </div>
+      </div>
+      <div id="editConstructionAdjust" class="form-row">
+        <label>Bottom Expansion Allowance Width (in) <input id="editConstructionBottomAdjustWidth" type="text" inputmode="decimal"></label>
+        <label>Bottom Expansion Allowance Length (in) <input id="editConstructionBottomAdjustLength" type="text" inputmode="decimal"></label>
+      </div>
+      <div id="editConstructionCustom">
+        <p class="help compact">Adjust each box dimension to calculate the part size.</p>
+        <div class="equation-grid">
+          <label>Front Rip = Box Height <span class="input-split"><select id="editConstructionCustomFrontRipSign" aria-label="Front rip adjustment direction"><option value="sub">-</option><option value="add">+</option></select><input id="editConstructionCustomFrontRipOffset" aria-label="Front rip adjustment" type="text" inputmode="decimal"></span></label>
+          <label>Back Rip = Box Height <span class="input-split"><select id="editConstructionCustomBackRipSign" aria-label="Back rip adjustment direction"><option value="sub">-</option><option value="add">+</option></select><input id="editConstructionCustomBackRipOffset" aria-label="Back rip adjustment" type="text" inputmode="decimal"></span></label>
+          <label>Side Rip = Box Height <span class="input-split"><select id="editConstructionCustomSideRipSign" aria-label="Side rip adjustment direction"><option value="sub">-</option><option value="add">+</option></select><input id="editConstructionCustomSideRipOffset" aria-label="Side rip adjustment" type="text" inputmode="decimal"></span></label>
+          <label>Front Length = Box Width <span class="input-split"><select id="editConstructionCustomFrontLenSign" aria-label="Front length adjustment direction"><option value="sub">-</option><option value="add">+</option></select><input id="editConstructionCustomFrontLenOffset" aria-label="Front length adjustment" type="text" inputmode="decimal"></span></label>
+          <label>Back Length = Box Width <span class="input-split"><select id="editConstructionCustomBackLenSign" aria-label="Back length adjustment direction"><option value="sub">-</option><option value="add">+</option></select><input id="editConstructionCustomBackLenOffset" aria-label="Back length adjustment" type="text" inputmode="decimal"></span></label>
+          <label>Side Length = Box Depth <span class="input-split"><select id="editConstructionCustomSideLenSign" aria-label="Side length adjustment direction"><option value="sub">-</option><option value="add">+</option></select><input id="editConstructionCustomSideLenOffset" aria-label="Side length adjustment" type="text" inputmode="decimal"></span></label>
+          <label>Bottom Rip Basis <select id="editConstructionCustomBottomWidthBasis"><option value="width">Box Width</option><option value="depth">Box Depth</option></select><span class="input-split"><select id="editConstructionCustomBottomWidthSign" aria-label="Bottom rip adjustment direction"><option value="sub">-</option><option value="add">+</option></select><input id="editConstructionCustomBottomWidthOffset" aria-label="Bottom rip adjustment" type="text" inputmode="decimal"></span></label>
+          <label>Bottom Length Basis <select id="editConstructionCustomBottomLengthBasis"><option value="depth">Box Depth</option><option value="width">Box Width</option></select><span class="input-split"><select id="editConstructionCustomBottomLengthSign" aria-label="Bottom length adjustment direction"><option value="sub">-</option><option value="add">+</option></select><input id="editConstructionCustomBottomLengthOffset" aria-label="Bottom length adjustment" type="text" inputmode="decimal"></span></label>
+        </div>
+      </div>
+      <p id="editConstructionError" class="door-style-error" role="alert"></p>
+      <div class="door-style-actions"><button id="editConstructionSave" type="submit">Save</button><button id="editConstructionCancel" type="button" class="secondary">Cancel</button></div>
     </form>
   </dialog>
 

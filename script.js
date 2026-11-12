@@ -2907,335 +2907,120 @@ async function editSlide(id) {
   await updateCatalogItem({ listKey: "drawerSlides", id, payload: updates, apiPath: "/api/drawer-slides" });
 }
 
-async function editConstruction(id) {
+let editingConstructionId = "";
+const constructionCustomFields = ["FrontRip", "BackRip", "SideRip", "FrontLen", "BackLen", "SideLen", "BottomWidth", "BottomLength"];
+const constructionCheckboxes = ["buttGrooveSides", "buttGrooveFront", "buttGrooveBack", "bottomThicknessIncluded", "dovetailFrontSetbackEnabled", "dovetailBackSetbackEnabled"];
+const constructionFields = [
+  "name", "constructionType", "sideThickness", "frontBackThickness", "bottomThickness", "bottomInset",
+  "bottomAdjustWidth", "bottomAdjustLength", "buttSideRun", "buttBottomPlacement", "buttGrooveDepth", "buttGrooveHeight",
+  ...constructionCheckboxes, "lockSideRun", "lockDadoDepth", "dovetailMode", "dovetailFrontSetback", "dovetailBackSetback",
+  ...constructionCustomFields.flatMap((field) => [`custom${field}Sign`, `custom${field}Offset`]),
+  "customBottomWidthBasis", "customBottomLengthBasis"
+];
+
+function constructionInput(field) {
+  if (field === "constructionType") return byId("editConstructionType");
+  return byId(`editConstruction${field[0].toUpperCase()}${field.slice(1)}`);
+}
+
+function updateEditConstructionVisibility() {
+  const type = constructionInput("constructionType").value;
+  const grooved = type === "butt" && constructionInput("buttBottomPlacement").value === "grooved";
+  const setback = type === "dovetail" && constructionInput("dovetailMode").value === "setback";
+  const show = (id, visible) => byId(id).classList.toggle("hidden", !visible);
+  show("editConstructionFrontBackWrap", type !== "lock");
+  show("editConstructionButt", type === "butt");
+  show("editConstructionGroove", grooved);
+  show("editConstructionIncludedWrap", type === "butt" && !grooved);
+  show("editConstructionLock", type === "lock");
+  show("editConstructionDovetail", type === "dovetail");
+  show("editConstructionSetbacks", setback);
+  show("editConstructionFrontSetbackWrap", setback && constructionInput("dovetailFrontSetbackEnabled").checked);
+  show("editConstructionBackSetbackWrap", setback && constructionInput("dovetailBackSetbackEnabled").checked);
+  show("editConstructionAdjust", type === "butt" || type === "dovetail");
+  show("editConstructionCustom", type === "custom");
+}
+
+function editConstruction(id) {
   const construction = state.catalog.drawerConstructions.find((item) => item.id === id);
-  if (!construction) {
+  if (!construction) return;
+  editingConstructionId = id;
+  const defaults = Object.assign({}, ...defaultCatalog().drawerConstructions);
+  // Defaults for missing type-specific fields match the creation wizard.
+  Object.assign(defaults, { name: "", constructionType: "butt", sideThickness: 0.5,
+    frontBackThickness: 0.5, bottomThickness: 0.25, bottomInset: 0.25 });
+  constructionFields.forEach((field) => {
+    const value = construction[field] ?? defaults[field] ?? 0;
+    if (constructionCheckboxes.includes(field)) constructionInput(field).checked = Boolean(value);
+    else constructionInput(field).value = String(value);
+  });
+  byId("editConstructionError").textContent = "";
+  updateEditConstructionVisibility();
+  byId("editConstructionDialog").showModal();
+}
+
+function parseConstructionMeasurement(value) {
+  const raw = String(value).trim();
+  const decimal = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i;
+  const fraction = /^[+-]?(?:\d+(?:\s+|\s*-\s*))?\d+\/\d+$/;
+  if (decimal.test(raw)) return Number(raw);
+  if (fraction.test(raw)) return parseFraction(raw);
+  return NaN;
+}
+
+async function saveEditedConstruction(event) {
+  event.preventDefault();
+  const type = constructionInput("constructionType").value;
+  const name = constructionInput("name").value.trim();
+  const updates = { name, constructionType: type };
+  const numeric = ["sideThickness", "bottomThickness"];
+  if (type !== "lock") numeric.push("frontBackThickness");
+  if (type === "butt" || type === "dovetail") numeric.push("bottomAdjustWidth", "bottomAdjustLength");
+  if (type === "butt") {
+    updates.buttSideRun = constructionInput("buttSideRun").value;
+    updates.buttBottomPlacement = constructionInput("buttBottomPlacement").value;
+    if (updates.buttBottomPlacement === "grooved") {
+      numeric.push("buttGrooveDepth", "buttGrooveHeight");
+      ["buttGrooveSides", "buttGrooveFront", "buttGrooveBack"].forEach((field) => { updates[field] = constructionInput(field).checked; });
+    } else updates.bottomThicknessIncluded = constructionInput("bottomThicknessIncluded").checked;
+  } else if (type === "lock") {
+    updates.lockSideRun = constructionInput("lockSideRun").value;
+    numeric.push("lockDadoDepth", "bottomInset");
+  } else if (type === "dovetail") {
+    updates.dovetailMode = constructionInput("dovetailMode").value;
+    if (updates.dovetailMode === "setback") {
+      ["Front", "Back"].forEach((side) => {
+        const enabled = `dovetail${side}SetbackEnabled`;
+        updates[enabled] = constructionInput(enabled).checked;
+        if (updates[enabled]) numeric.push(`dovetail${side}Setback`);
+      });
+    }
+  } else if (type === "custom") {
+    constructionCustomFields.forEach((field) => {
+      updates[`custom${field}Sign`] = constructionInput(`custom${field}Sign`).value;
+      numeric.push(`custom${field}Offset`);
+    });
+    updates.customBottomWidthBasis = constructionInput("customBottomWidthBasis").value;
+    updates.customBottomLengthBasis = constructionInput("customBottomLengthBasis").value;
+  }
+  numeric.forEach((field) => { updates[field] = parseConstructionMeasurement(constructionInput(field).value); });
+  if (!name || !["butt", "lock", "dovetail", "custom"].includes(type) || numeric.some((field) =>
+    !Number.isFinite(updates[field]) ||
+    (updates[field] < 0 && !field.startsWith("custom") && !field.startsWith("bottomAdjust")) ||
+    (["sideThickness", "frontBackThickness", "bottomThickness"].includes(field) && updates[field] <= 0))) {
+    byId("editConstructionError").textContent = "Enter a name, positive thicknesses, and valid measurements (depths, insets, and setbacks must be non-negative).";
     return;
   }
-
-  const name = prompt("Construction name", construction.name);
-  if (!name) {
-    return;
+  if (type === "lock") updates.frontBackThickness = updates.sideThickness;
+  const saveButton = byId("editConstructionSave");
+  saveButton.disabled = true;
+  try {
+    if (await updateCatalogItem({ listKey: "drawerConstructions", id: editingConstructionId, payload: updates, apiPath: "/api/drawer-constructions" })) {
+      byId("editConstructionDialog").close();
+    }
+  } finally {
+    saveButton.disabled = false;
   }
-
-  const typePrompt = prompt("Construction type (butt, lock, dovetail, custom)", construction.constructionType || "butt");
-  if (!typePrompt) {
-    return;
-  }
-  const constructionType = typePrompt.trim();
-
-  const sideThickness = prompt("Side thickness", formatMeasurement(construction.sideThickness));
-  if (sideThickness === null) {
-    return;
-  }
-  let frontBackThickness = construction.frontBackThickness;
-  if (constructionType !== "lock") {
-    const frontBackPrompt = prompt("Front/Back thickness", formatMeasurement(construction.frontBackThickness));
-    if (frontBackPrompt === null) {
-      return;
-    }
-    frontBackThickness = parseMeasurement(frontBackPrompt);
-  } else {
-    frontBackThickness = parseMeasurement(sideThickness);
-  }
-  const bottomThickness = prompt("Bottom thickness", formatMeasurement(construction.bottomThickness));
-  if (bottomThickness === null) {
-    return;
-  }
-  const bottomIncluded = prompt("Bottom thickness included in drawer height? (y/n)", construction.bottomThicknessIncluded ? "y" : "n");
-  if (bottomIncluded === null) {
-    return;
-  }
-  const bottomAdjustWidth = prompt("Bottom adjust width (total)", formatMeasurement(construction.bottomAdjustWidth));
-  if (bottomAdjustWidth === null) {
-    return;
-  }
-  const bottomAdjustLength = prompt("Bottom adjust length (total)", formatMeasurement(construction.bottomAdjustLength));
-  if (bottomAdjustLength === null) {
-    return;
-  }
-
-  let buttSideRun = construction.buttSideRun || "length";
-  let buttBottomPlacement = construction.buttBottomPlacement || "grooved";
-  let buttGrooveDepth = construction.buttGrooveDepth || 0;
-  let buttGrooveHeight = construction.buttGrooveHeight || 0;
-  let buttGrooveSides = construction.buttGrooveSides !== undefined ? construction.buttGrooveSides : true;
-  let buttGrooveFront = construction.buttGrooveFront !== undefined ? construction.buttGrooveFront : true;
-  let buttGrooveBack = construction.buttGrooveBack !== undefined ? construction.buttGrooveBack : false;
-  let lockSideRun = construction.lockSideRun || "length";
-  let lockDadoDepth = construction.lockDadoDepth || 0;
-  let dovetailMode = construction.dovetailMode || "through";
-  let dovetailFrontSetbackEnabled = construction.dovetailFrontSetbackEnabled || false;
-  let dovetailBackSetbackEnabled = construction.dovetailBackSetbackEnabled || false;
-  let dovetailFrontSetback = Number.isFinite(construction.dovetailFrontSetback) ? construction.dovetailFrontSetback : 0;
-  let dovetailBackSetback = Number.isFinite(construction.dovetailBackSetback) ? construction.dovetailBackSetback : 0;
-  let customFrontRipSign = construction.customFrontRipSign || "sub";
-  let customFrontRipOffset = Number.isFinite(construction.customFrontRipOffset) ? construction.customFrontRipOffset : 0;
-  let customBackRipSign = construction.customBackRipSign || "sub";
-  let customBackRipOffset = Number.isFinite(construction.customBackRipOffset) ? construction.customBackRipOffset : 0;
-  let customSideRipSign = construction.customSideRipSign || "sub";
-  let customSideRipOffset = Number.isFinite(construction.customSideRipOffset) ? construction.customSideRipOffset : 0;
-  let customFrontLenSign = construction.customFrontLenSign || "sub";
-  let customFrontLenOffset = Number.isFinite(construction.customFrontLenOffset) ? construction.customFrontLenOffset : 0;
-  let customBackLenSign = construction.customBackLenSign || "sub";
-  let customBackLenOffset = Number.isFinite(construction.customBackLenOffset) ? construction.customBackLenOffset : 0;
-  let customSideLenSign = construction.customSideLenSign || "sub";
-  let customSideLenOffset = Number.isFinite(construction.customSideLenOffset) ? construction.customSideLenOffset : 0;
-  let customBottomWidthBasis = construction.customBottomWidthBasis || "width";
-  let customBottomWidthSign = construction.customBottomWidthSign || "sub";
-  let customBottomWidthOffset = Number.isFinite(construction.customBottomWidthOffset) ? construction.customBottomWidthOffset : 0;
-  let customBottomLengthBasis = construction.customBottomLengthBasis || "depth";
-  let customBottomLengthSign = construction.customBottomLengthSign || "sub";
-  let customBottomLengthOffset = Number.isFinite(construction.customBottomLengthOffset) ? construction.customBottomLengthOffset : 0;
-  let bottomThicknessIncluded = bottomIncluded.trim().toLowerCase().startsWith("y");
-
-  if (constructionType === "butt") {
-    const sideRun = prompt("Butt joint - sides run (length/between)", buttSideRun);
-    if (sideRun === null) {
-      return;
-    }
-    buttSideRun = sideRun.trim();
-
-    const bottomPlacement = prompt("Butt joint - bottom placement (grooved/planted)", buttBottomPlacement);
-    if (bottomPlacement === null) {
-      return;
-    }
-    buttBottomPlacement = bottomPlacement.trim();
-
-    const grooveDepth = prompt("Butt joint - groove depth", formatMeasurement(buttGrooveDepth));
-    if (grooveDepth === null) {
-      return;
-    }
-    const grooveHeight = prompt("Butt joint - groove height from bottom", formatMeasurement(buttGrooveHeight));
-    if (grooveHeight === null) {
-      return;
-    }
-    buttGrooveDepth = parseMeasurement(grooveDepth);
-    buttGrooveHeight = parseMeasurement(grooveHeight);
-
-    const grooveSides = prompt("Butt joint - groove sides? (y/n)", buttGrooveSides ? "y" : "n");
-    if (grooveSides === null) {
-      return;
-    }
-    buttGrooveSides = grooveSides.trim().toLowerCase().startsWith("y");
-
-    const grooveFront = prompt("Butt joint - groove front? (y/n)", buttGrooveFront ? "y" : "n");
-    if (grooveFront === null) {
-      return;
-    }
-    buttGrooveFront = grooveFront.trim().toLowerCase().startsWith("y");
-
-    const grooveBack = prompt("Butt joint - groove back? (y/n)", buttGrooveBack ? "y" : "n");
-    if (grooveBack === null) {
-      return;
-    }
-    buttGrooveBack = grooveBack.trim().toLowerCase().startsWith("y");
-  } else if (constructionType === "lock") {
-    const sideRun = prompt("Lock joint - sides run (length/between)", lockSideRun);
-    if (sideRun === null) {
-      return;
-    }
-    lockSideRun = sideRun.trim();
-
-    const dadoDepth = prompt("Lock joint - dado depth", formatMeasurement(lockDadoDepth));
-    if (dadoDepth === null) {
-      return;
-    }
-    lockDadoDepth = parseMeasurement(dadoDepth);
-  } else if (constructionType === "dovetail") {
-    const mode = prompt("Dovetail mode (through/setback)", dovetailMode);
-    if (mode === null) {
-      return;
-    }
-    dovetailMode = mode.trim();
-    if (dovetailMode === "setback") {
-      const frontEnabled = prompt("Dovetail - front setback? (y/n)", dovetailFrontSetbackEnabled ? "y" : "n");
-      if (frontEnabled === null) {
-        return;
-      }
-      dovetailFrontSetbackEnabled = frontEnabled.trim().toLowerCase().startsWith("y");
-      const backEnabled = prompt("Dovetail - back setback? (y/n)", dovetailBackSetbackEnabled ? "y" : "n");
-      if (backEnabled === null) {
-        return;
-      }
-      dovetailBackSetbackEnabled = backEnabled.trim().toLowerCase().startsWith("y");
-
-      if (dovetailFrontSetbackEnabled) {
-        const frontSetback = prompt("Dovetail - front setback", formatMeasurement(dovetailFrontSetback));
-        if (frontSetback === null) {
-          return;
-        }
-        dovetailFrontSetback = parseMeasurement(frontSetback);
-      } else {
-        dovetailFrontSetback = 0;
-      }
-
-      if (dovetailBackSetbackEnabled) {
-        const backSetback = prompt("Dovetail - back setback", formatMeasurement(dovetailBackSetback));
-        if (backSetback === null) {
-          return;
-        }
-        dovetailBackSetback = parseMeasurement(backSetback);
-      } else {
-        dovetailBackSetback = 0;
-      }
-    } else {
-      dovetailFrontSetbackEnabled = false;
-      dovetailBackSetbackEnabled = false;
-      dovetailFrontSetback = 0;
-      dovetailBackSetback = 0;
-    }
-  } else if (constructionType === "custom") {
-    const frontRipSign = prompt("Custom - front rip sign (add/sub)", customFrontRipSign);
-    if (frontRipSign === null) {
-      return;
-    }
-    customFrontRipSign = frontRipSign.trim();
-    const frontRipOffset = prompt("Custom - front rip offset", formatMeasurement(customFrontRipOffset));
-    if (frontRipOffset === null) {
-      return;
-    }
-    customFrontRipOffset = parseMeasurement(frontRipOffset);
-
-    const backRipSign = prompt("Custom - back rip sign (add/sub)", customBackRipSign);
-    if (backRipSign === null) {
-      return;
-    }
-    customBackRipSign = backRipSign.trim();
-    const backRipOffset = prompt("Custom - back rip offset", formatMeasurement(customBackRipOffset));
-    if (backRipOffset === null) {
-      return;
-    }
-    customBackRipOffset = parseMeasurement(backRipOffset);
-
-    const sideRipSign = prompt("Custom - side rip sign (add/sub)", customSideRipSign);
-    if (sideRipSign === null) {
-      return;
-    }
-    customSideRipSign = sideRipSign.trim();
-    const sideRipOffset = prompt("Custom - side rip offset", formatMeasurement(customSideRipOffset));
-    if (sideRipOffset === null) {
-      return;
-    }
-    customSideRipOffset = parseMeasurement(sideRipOffset);
-
-    const frontLenSign = prompt("Custom - front length sign (add/sub)", customFrontLenSign);
-    if (frontLenSign === null) {
-      return;
-    }
-    customFrontLenSign = frontLenSign.trim();
-    const frontLenOffset = prompt("Custom - front length offset", formatMeasurement(customFrontLenOffset));
-    if (frontLenOffset === null) {
-      return;
-    }
-    customFrontLenOffset = parseMeasurement(frontLenOffset);
-
-    const backLenSign = prompt("Custom - back length sign (add/sub)", customBackLenSign);
-    if (backLenSign === null) {
-      return;
-    }
-    customBackLenSign = backLenSign.trim();
-    const backLenOffset = prompt("Custom - back length offset", formatMeasurement(customBackLenOffset));
-    if (backLenOffset === null) {
-      return;
-    }
-    customBackLenOffset = parseMeasurement(backLenOffset);
-
-    const sideLenSign = prompt("Custom - side length sign (add/sub)", customSideLenSign);
-    if (sideLenSign === null) {
-      return;
-    }
-    customSideLenSign = sideLenSign.trim();
-    const sideLenOffset = prompt("Custom - side length offset", formatMeasurement(customSideLenOffset));
-    if (sideLenOffset === null) {
-      return;
-    }
-    customSideLenOffset = parseMeasurement(sideLenOffset);
-
-    const bottomWidthBasis = prompt("Custom - bottom width basis (width/depth)", customBottomWidthBasis);
-    if (bottomWidthBasis === null) {
-      return;
-    }
-    customBottomWidthBasis = bottomWidthBasis.trim();
-    const bottomWidthSign = prompt("Custom - bottom width sign (add/sub)", customBottomWidthSign);
-    if (bottomWidthSign === null) {
-      return;
-    }
-    customBottomWidthSign = bottomWidthSign.trim();
-    const bottomWidthOffset = prompt("Custom - bottom width offset", formatMeasurement(customBottomWidthOffset));
-    if (bottomWidthOffset === null) {
-      return;
-    }
-    customBottomWidthOffset = parseMeasurement(bottomWidthOffset);
-
-    const bottomLengthBasis = prompt("Custom - bottom length basis (width/depth)", customBottomLengthBasis);
-    if (bottomLengthBasis === null) {
-      return;
-    }
-    customBottomLengthBasis = bottomLengthBasis.trim();
-    const bottomLengthSign = prompt("Custom - bottom length sign (add/sub)", customBottomLengthSign);
-    if (bottomLengthSign === null) {
-      return;
-    }
-    customBottomLengthSign = bottomLengthSign.trim();
-    const bottomLengthOffset = prompt("Custom - bottom length offset", formatMeasurement(customBottomLengthOffset));
-    if (bottomLengthOffset === null) {
-      return;
-    }
-    customBottomLengthOffset = parseMeasurement(bottomLengthOffset);
-  } else {
-    lockSideRun = "length";
-  }
-
-  const updates = {
-    name: name.trim(),
-    constructionType,
-    sideThickness: parseMeasurement(sideThickness),
-    frontBackThickness,
-    bottomThickness: parseMeasurement(bottomThickness),
-    bottomThicknessIncluded,
-    bottomAdjustWidth: parseMeasurement(bottomAdjustWidth),
-    bottomAdjustLength: parseMeasurement(bottomAdjustLength),
-    buttSideRun,
-    buttBottomPlacement,
-    buttGrooveDepth,
-    buttGrooveHeight,
-    buttGrooveSides,
-    buttGrooveFront,
-    buttGrooveBack,
-    dovetailMode,
-    dovetailFrontSetbackEnabled,
-    dovetailBackSetbackEnabled,
-    dovetailFrontSetback,
-    dovetailBackSetback,
-    customFrontRipSign,
-    customFrontRipOffset,
-    customBackRipSign,
-    customBackRipOffset,
-    customSideRipSign,
-    customSideRipOffset,
-    customFrontLenSign,
-    customFrontLenOffset,
-    customBackLenSign,
-    customBackLenOffset,
-    customSideLenSign,
-    customSideLenOffset,
-    customBottomWidthBasis,
-    customBottomWidthSign,
-    customBottomWidthOffset,
-    customBottomLengthBasis,
-    customBottomLengthSign,
-    customBottomLengthOffset,
-    lockSideRun,
-    lockDadoDepth
-  };
-
-  if (!Number.isFinite(updates.sideThickness) || !Number.isFinite(updates.frontBackThickness)) {
-    alert("Enter valid numeric sizes.");
-    return;
-  }
-
-  await updateCatalogItem({ listKey: "drawerConstructions", id, payload: updates, apiPath: "/api/drawer-constructions" });
 }
 
 function renderDoorStyles() {
@@ -3474,6 +3259,11 @@ function wireButtons() {
   byId("editDoorStyleCancel").addEventListener("click", () => byId("editDoorStyleDialog").close());
   ["editDoorJointType", "editDoorMatch", "editDoorOversize"].forEach((id) => {
     byId(id).addEventListener("change", updateEditDoorStyleVisibility);
+  });
+  byId("editConstructionForm").addEventListener("submit", saveEditedConstruction);
+  byId("editConstructionCancel").addEventListener("click", () => byId("editConstructionDialog").close());
+  ["constructionType", "buttBottomPlacement", "dovetailMode", "dovetailFrontSetbackEnabled", "dovetailBackSetbackEnabled"].forEach((field) => {
+    constructionInput(field).addEventListener("change", updateEditConstructionVisibility);
   });
   byId("loadProjectBtn").addEventListener("click", loadProject);
   byId("deleteProjectBtn").addEventListener("click", deleteProject);

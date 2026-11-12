@@ -21,6 +21,8 @@ Door calculations use the selected style's stile and rail widths, groove depth, 
 
 Oversize increases both overall door dimensions by the entered amount and each stile and rail width by half that amount, leaving the panel and cope-and-stick rail lengths unchanged. For example, 1/8 inch oversize increases a 2 1/4 inch frame width to 2 5/16 inches for trimming after assembly. Existing cope-and-stick styles now apply clearance on all four panel edges, so their panel dimensions may differ from earlier cutlists.
 
+Drawer constructions can be edited in a single dialog, with settings for the selected joint type. For grooved butt joints, checked parts remain the full box height; unchecked parts are shortened by the groove height plus bottom thickness.
+
 ## Identity exchange flow
 
 Your website backend should send JSON identity payloads to `POST /api/auth/sso` with:

@@ -294,6 +294,10 @@ h1 {
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 }
 
+.groove-help {
+  grid-column: 1 / -1;
+}
+
 .input-split {
   display: grid;
   grid-template-columns: 60px 1fr;
