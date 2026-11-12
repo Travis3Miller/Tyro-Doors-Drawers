@@ -395,6 +395,29 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   assert.equal(sessionBody.authenticated, true);
   assert.equal(sessionBody.user.email, "user-a@example.com");
 
+  await fs.writeFile(legacyStoreFile, JSON.stringify({
+    users: {
+      [`auth:${sessionBody.user.id}`]: {
+        doorStyles: [{ id: "legacy-style", name: "Existing style", stileWidth: 3 }]
+      }
+    }
+  }));
+  const migratedStoreRes = await jsonRequest(baseUrl, "/api/store", { headers: { cookie: sessionCookieA } });
+  assert.equal((await migratedStoreRes.json()).doorStyles[0].id, "legacy-style");
+  await fs.unlink(legacyStoreFile);
+  const createStyleRes = await jsonRequest(baseUrl, "/api/door-styles", {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: sessionCookieA },
+    body: JSON.stringify({ name: "Custom style", stileWidth: 4, railWidth: 4, grooveDepth: 0.25, panelClearance: 0.125 })
+  });
+  assert.equal(createStyleRes.status, 201);
+  const customStyle = await createStyleRes.json();
+  const { createUserStore } = require("../user-store");
+  const restartedStore = createUserStore({ filePath: userStoreFile });
+  await restartedStore.init();
+  const persistedCatalog = await restartedStore.getCatalog(sessionBody.user.id);
+  assert.deepEqual(persistedCatalog.doorStyles.map((style) => style.id), ["legacy-style", customStyle.id]);
+
   const userAIdentityRebind = JSON.stringify({
     email: "user-a@example.com",
     name: "User A Renamed",
@@ -428,10 +451,17 @@ test("health/config, auth session, project isolation, and billing entitlement", 
     },
     body: JSON.stringify({
       name: "A Project",
-      payload: { doors: [{ width: 12 }] }
+      payload: { doors: [{ width: 12 }], doorSizeStyleId: customStyle.id }
     })
   });
   assert.equal(createProjectRes.status, 201);
+  const savedProject = await createProjectRes.json();
+  const projectStoreAfterRestart = createUserStore({ filePath: userStoreFile });
+  await projectStoreAfterRestart.init();
+  const reopenedProjects = await projectStoreAfterRestart.listProjectsByUser(sessionBody.user.id);
+  assert.equal(reopenedProjects[0].name, "A Project");
+  assert.equal(reopenedProjects[0].payload.doorSizeStyleId, customStyle.id);
+  assert.equal(reopenedProjects[0].id, savedProject.id);
 
   const invalidWixBridgeRes = await jsonRequest(baseUrl, "/api/auth/wix/bridge", {
     method: "POST",
@@ -549,6 +579,8 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   const projectsB = await projectsBRes.json();
   assert.equal(projectsBRes.status, 200);
   assert.equal(projectsB.length, 0);
+  const storeBRes = await jsonRequest(baseUrl, "/api/store", { headers: { cookie: sessionCookieB } });
+  assert.equal((await storeBRes.json()).doorStyles.some((style) => style.id === customStyle.id), false);
   const bearerProjectsBRes = await jsonRequest(baseUrl, "/api/projects", {
     headers: { authorization: "Bearer " + wixBridgeBBody.sessionToken }
   });

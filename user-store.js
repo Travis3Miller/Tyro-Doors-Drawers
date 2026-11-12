@@ -55,7 +55,8 @@ function emptyState() {
   return {
     users: [],
     projects: [],
-    presets: []
+    presets: [],
+    catalogs: {}
   };
 }
 
@@ -64,7 +65,8 @@ function normalizeState(value) {
   return {
     users: Array.isArray(source.users) ? source.users : [],
     projects: Array.isArray(source.projects) ? source.projects : [],
-    presets: Array.isArray(source.presets) ? source.presets : []
+    presets: Array.isArray(source.presets) ? source.presets : [],
+    catalogs: source.catalogs && typeof source.catalogs === "object" && !Array.isArray(source.catalogs) ? source.catalogs : {}
   };
 }
 
@@ -194,6 +196,11 @@ class UserStore {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
 
+        CREATE TABLE IF NOT EXISTS user_catalogs (
+          user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+          data JSONB NOT NULL
+        );
+
         CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower_unique
           ON users(LOWER(email))
           WHERE email IS NOT NULL;
@@ -237,6 +244,48 @@ class UserStore {
     const run = this._fileQueue.then(() => operation());
     this._fileQueue = run.catch(() => {});
     return run;
+  }
+
+  async getCatalog(userId) {
+    if (this.mode === "postgres") {
+      const result = await this.pool.query("SELECT data FROM user_catalogs WHERE user_id = $1", [userId]);
+      return result.rows[0] ? result.rows[0].data : null;
+    }
+    const state = await this._readFileState();
+    return state.catalogs[userId] || null;
+  }
+
+  async mutateCatalog(userId, initialCatalog, mutator) {
+    if (this.mode === "postgres") {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          "INSERT INTO user_catalogs (user_id, data) VALUES ($1, $2::jsonb) ON CONFLICT (user_id) DO NOTHING",
+          [userId, JSON.stringify(initialCatalog)]
+        );
+        const row = await client.query("SELECT data FROM user_catalogs WHERE user_id = $1 FOR UPDATE", [userId]);
+        const catalog = row.rows[0].data;
+        const result = mutator(catalog);
+        await client.query("UPDATE user_catalogs SET data = $2::jsonb WHERE user_id = $1", [userId, JSON.stringify(catalog)]);
+        await client.query("COMMIT");
+        return result;
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
+    }
+
+    return this._withFileLock(async () => {
+      const state = await this._readFileState();
+      const catalog = state.catalogs[userId] || initialCatalog;
+      const result = mutator(catalog);
+      state.catalogs[userId] = catalog;
+      await this._writeFileState(state);
+      return result;
+    });
   }
 
   async _lookupUserByFieldPostgres(db, field, value) {

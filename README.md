@@ -102,7 +102,9 @@ Run tests:
 npm test
 ```
 
-Without `DATABASE_URL`, user/account/project/preset data falls back to local JSON file storage.
+Projects, presets, custom styles, and settings are stored per account in Postgres when `DATABASE_URL` is configured. Without it, they use `USER_STORE_FILE` (default `data/user-store.json`), which must be on persistent storage to survive deployments. The browser does not claim account saves succeeded when the API is unavailable.
+
+Existing account catalogs in `LEGACY_STORE_FILE` (default `data/store.json`) are copied into the account store on first access. Back up that file before deploying and make it available to the new service until all accounts have migrated; an ephemeral file already lost on a previous deployment cannot be recovered by this migration. Old browser-only saves are not automatically uploaded.
 
 ## Render deployment notes
 

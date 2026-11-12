@@ -18,7 +18,6 @@ const WIX_BRIDGE_SESSION_TTL_MS = 1000 * 60 * 30;
 const PRO_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "paid", "pending"]);
 const DENIED_ORDER_STATUSES = new Set(["CANCELED", "ENDED", "PAUSED", "REFUNDED", "FAILED"]);
 const RETENTION_MONTHS = Number(process.env.DATA_RETENTION_MONTHS || 13);
-let legacyStoreQueue = Promise.resolve();
 const STATIC_FILES = new Set([
   "index.html",
   "script.js",
@@ -667,29 +666,10 @@ async function readStore() {
     return normalizeStore(JSON.parse(raw));
   } catch (err) {
     if (err && err.code === "ENOENT") {
-      const fallback = normalizeStore({});
-      await writeStore(fallback);
-      return fallback;
+      return normalizeStore({});
     }
     throw err;
   }
-}
-
-async function writeStore(store) {
-  const normalized = normalizeStore(store);
-  await fs.mkdir(path.dirname(DATA_FILE), { recursive: true });
-  await fs.writeFile(DATA_FILE, JSON.stringify(normalized, null, 2), "utf8");
-}
-
-function mutateLegacyStore(mutator) {
-  const run = legacyStoreQueue.then(async () => {
-    const store = await readStore();
-    const result = await mutator(store);
-    await writeStore(store);
-    return result;
-  });
-  legacyStoreQueue = run.catch(() => {});
-  return run;
 }
 
 function defaultCatalog() {
@@ -900,20 +880,6 @@ function normalizeStore(store) {
   return { users };
 }
 
-function catalogScopeUserId(req) {
-  if (req.currentUser && req.currentUser.id) {
-    return `auth:${req.currentUser.id}`;
-  }
-  return PUBLIC_USER_ID;
-}
-
-function getUserStore(store, userId) {
-  if (!store.users[userId]) {
-    store.users[userId] = defaultUserStore();
-  }
-  return store.users[userId];
-}
-
 function attachRawBody(req, _res, buffer) {
   req.rawBody = buffer.toString("utf8");
 }
@@ -944,6 +910,16 @@ function createApp(options = {}) {
   });
   const userStore = options.userStore || createUserStore({});
   const userStoreReady = Promise.resolve(userStore.init());
+
+  async function getAccountCatalog(userId) {
+    const existing = await userStore.getCatalog(userId);
+    if (existing) {
+      return normalizeUserStore(existing);
+    }
+    const legacy = await readStore();
+    const initial = legacy.users[`auth:${userId}`] || defaultUserStore();
+    return userStore.mutateCatalog(userId, initial, (catalog) => normalizeUserStore(catalog));
+  }
 
   app.use(cors({
     credentials: true,
@@ -1382,8 +1358,7 @@ function createApp(options = {}) {
   app.get("/api/store", async (req, res) => {
     try {
       await userStoreReady;
-      const store = await readStore();
-      const catalogStore = getUserStore(store, catalogScopeUserId(req));
+      const catalogStore = req.currentUser ? await getAccountCatalog(req.currentUser.id) : defaultUserStore();
       const projects = req.currentUser ? await userStore.listProjectsByUser(req.currentUser.id) : [];
       res.json({ ...catalogStore, projects });
     } catch (_err) {
@@ -1498,8 +1473,8 @@ function createApp(options = {}) {
   app.put("/api/settings", requireAuth, requireSubscriber, async (req, res) => {
     try {
       const body = req.body || {};
-      const settings = await mutateLegacyStore(async (store) => {
-        const userStoreRecord = getUserStore(store, catalogScopeUserId(req));
+      const initial = await getAccountCatalog(req.currentUser.id);
+      const settings = await userStore.mutateCatalog(req.currentUser.id, initial, (userStoreRecord) => {
         userStoreRecord.settings = {
           ...userStoreRecord.settings,
           unitSystem: body.unitSystem === "metric" ? "metric" : "in",
@@ -1516,8 +1491,8 @@ function createApp(options = {}) {
   function listHandlers({ listKey, pathBase }) {
     app.post(`/api/${pathBase}`, requireAuth, requireSubscriber, async (req, res) => {
       try {
-        const item = await mutateLegacyStore(async (store) => {
-          const userStoreRecord = getUserStore(store, catalogScopeUserId(req));
+        const initial = await getAccountCatalog(req.currentUser.id);
+        const item = await userStore.mutateCatalog(req.currentUser.id, initial, (userStoreRecord) => {
           const nextItem = { id: crypto.randomUUID(), ...(req.body || {}) };
           userStoreRecord[listKey].push(nextItem);
           return nextItem;
@@ -1530,8 +1505,8 @@ function createApp(options = {}) {
 
     app.put(`/api/${pathBase}/:id`, requireAuth, requireSubscriber, async (req, res) => {
       try {
-        const updated = await mutateLegacyStore(async (store) => {
-          const userStoreRecord = getUserStore(store, catalogScopeUserId(req));
+        const initial = await getAccountCatalog(req.currentUser.id);
+        const updated = await userStore.mutateCatalog(req.currentUser.id, initial, (userStoreRecord) => {
           const idx = userStoreRecord[listKey].findIndex((item) => item.id === req.params.id);
           if (idx < 0) {
             return null;
@@ -1552,8 +1527,8 @@ function createApp(options = {}) {
 
     app.delete(`/api/${pathBase}/:id`, requireAuth, requireSubscriber, async (req, res) => {
       try {
-        const deleted = await mutateLegacyStore(async (store) => {
-          const userStoreRecord = getUserStore(store, catalogScopeUserId(req));
+        const initial = await getAccountCatalog(req.currentUser.id);
+        const deleted = await userStore.mutateCatalog(req.currentUser.id, initial, (userStoreRecord) => {
           const before = userStoreRecord[listKey].length;
           userStoreRecord[listKey] = userStoreRecord[listKey].filter((item) => item.id !== req.params.id);
           return userStoreRecord[listKey].length !== before;

@@ -75,4 +75,4 @@ window.CUTLISTER_CONFIG = {
 - Run `npm start`
 - Run `npm test`
 
-When `DATABASE_URL` is missing, user/account/project/preset data uses local JSON storage.
+When `DATABASE_URL` is missing, user/account/project/preset/catalog data uses local JSON storage. Use a persistent disk for `USER_STORE_FILE` if this data must survive redeployments. Preserve the old `LEGACY_STORE_FILE` across the deployment for account catalogs to migrate on first access; see the README.

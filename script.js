@@ -412,16 +412,8 @@ function readLocalJson(key, fallback) {
   }
 }
 
-function writeLocalJson(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
-}
-
 function localSettings() {
   return normalizeSettings(readLocalJson(LOCAL_SETTINGS_KEY, defaultSettings()));
-}
-
-function saveLocalSettings(settings) {
-  writeLocalJson(LOCAL_SETTINGS_KEY, settings);
 }
 
 async function ensureDataMode() {
@@ -442,20 +434,21 @@ async function ensureDataMode() {
   return state.dataMode;
 }
 
+async function requireApiForSave() {
+  if (state.dataMode === "local") {
+    state.dataMode = "unknown";
+  }
+  if (await ensureDataMode() !== "api") {
+    throw new Error("The server is unavailable. Your changes were not saved to your account. Please try again when the connection is restored.");
+  }
+}
+
 function localCatalog() {
   return normalizeCatalog(readLocalJson(LOCAL_CATALOG_KEY, defaultCatalog()));
 }
 
-function saveLocalCatalog(catalog) {
-  writeLocalJson(LOCAL_CATALOG_KEY, catalog);
-}
-
 function localProjects() {
   return readLocalJson(LOCAL_PROJECTS_KEY, []);
-}
-
-function saveLocalProjects(projects) {
-  writeLocalJson(LOCAL_PROJECTS_KEY, projects);
 }
 
 function round2(value) {
@@ -592,13 +585,17 @@ function fmt(value) {
   return formatMeasurement(value);
 }
 
+let catalogLoadVersion = 0;
 async function loadCatalog() {
+  const version = ++catalogLoadVersion;
   if (await ensureDataMode() === "api") {
     const store = await apiJson("/api/store");
+    if (version !== catalogLoadVersion) return;
     state.catalog = normalizeCatalog(store);
     state.projects = Array.isArray(store.projects) ? store.projects : [];
     state.settings = normalizeSettings(store.settings);
   } else {
+    if (version !== catalogLoadVersion) return;
     state.catalog = localCatalog();
     state.projects = localProjects();
     state.settings = localSettings();
@@ -649,7 +646,7 @@ function listenForWixMember() {
       loadCatalog().then(async () => {
         await refreshUi();
         await refreshWelcomeBanner();
-      }).catch(() => {});
+      }).catch((err) => showAppMessage("Could not load account data", err.message));
       return;
     }
     if (data.type !== "wix-member" || typeof data.name !== "string") {
@@ -660,12 +657,13 @@ function listenForWixMember() {
     wixMemberPaid = data.paid === true;
     setWelcomeName(wixMemberName);
     if (typeof data.sessionToken === "string" && data.sessionToken) {
+      const hadToken = Boolean(wixSessionToken);
       wixSessionToken = data.sessionToken;
       const nextUserId = typeof data.userId === "string" ? data.userId : "";
-      if (nextUserId !== wixBackendUserId) {
+      if (!hadToken || nextUserId !== wixBackendUserId) {
         wixBackendUserId = nextUserId;
         state.dataMode = "unknown";
-        loadCatalog().then(refreshUi).catch(() => {});
+        loadCatalog().then(refreshUi).catch((err) => showAppMessage("Could not load account data", err.message));
       }
       refreshWelcomeBanner();
     }
@@ -775,14 +773,15 @@ async function refreshUi() {
 function populateDoorStyleSelects() {
   const doorStyleSelect = byId("doorStyleSelect");
   const doorOpeningStyleSelect = byId("doorOpeningStyleSelect");
-  if (doorStyleSelect) {
-    doorStyleSelect.innerHTML = "";
-    doorStyleOptions().forEach((option) => doorStyleSelect.appendChild(option));
-  }
-  if (doorOpeningStyleSelect) {
-    doorOpeningStyleSelect.innerHTML = "";
-    doorStyleOptions().forEach((option) => doorOpeningStyleSelect.appendChild(option));
-  }
+  [doorStyleSelect, doorOpeningStyleSelect].filter(Boolean).forEach((select) => {
+    const selected = select.value;
+    select.innerHTML = "";
+    doorStyleOptions(selected).forEach((option) => select.appendChild(option));
+    if (selected && !state.catalog.doorStyles.some((style) => style.id === selected)) {
+      select.appendChild(createOption(selected, "Unavailable saved style - choose a replacement"));
+      select.value = selected;
+    }
+  });
 }
 
 function populateDrawerInputSelects() {
@@ -792,20 +791,24 @@ function populateDrawerInputSelects() {
   const boxConstructionSelect = byId("drawerBoxConstructionSelect");
 
   if (openingSlideSelect) {
+    const selected = openingSlideSelect.value;
     openingSlideSelect.innerHTML = "";
-    slideOptions().forEach((option) => openingSlideSelect.appendChild(option));
+    slideOptions(selected).forEach((option) => openingSlideSelect.appendChild(option));
   }
   if (openingConstructionSelect) {
+    const selected = openingConstructionSelect.value;
     openingConstructionSelect.innerHTML = "";
-    constructionOptions().forEach((option) => openingConstructionSelect.appendChild(option));
+    constructionOptions(selected).forEach((option) => openingConstructionSelect.appendChild(option));
   }
   if (boxSlideSelect) {
+    const selected = boxSlideSelect.value;
     boxSlideSelect.innerHTML = "";
-    slideOptions().forEach((option) => boxSlideSelect.appendChild(option));
+    slideOptions(selected).forEach((option) => boxSlideSelect.appendChild(option));
   }
   if (boxConstructionSelect) {
+    const selected = boxConstructionSelect.value;
     boxConstructionSelect.innerHTML = "";
-    constructionOptions().forEach((option) => boxConstructionSelect.appendChild(option));
+    constructionOptions(selected).forEach((option) => boxConstructionSelect.appendChild(option));
   }
 }
 
@@ -872,6 +875,7 @@ function renderInputSummaries() {
 
 function populateProjectSelect() {
   const select = byId("projectSelect");
+  const selected = select.value;
   select.innerHTML = '<option value="">Select a saved project</option>';
   state.projects.forEach((project) => {
     const option = document.createElement("option");
@@ -879,6 +883,9 @@ function populateProjectSelect() {
     option.textContent = project.name;
     select.appendChild(option);
   });
+  if (state.projects.some((project) => project.id === selected)) {
+    select.value = selected;
+  }
 }
 
 function createOption(value, label) {
@@ -1631,6 +1638,11 @@ function renderDoorResults({ doorList, stileRailParts, panelParts }) {
 }
 
 function calculateDoorCutlist() {
+  const activeSelect = byId(state.ui.doorInputMode === "opening" ? "doorOpeningStyleSelect" : "doorStyleSelect");
+  if (!activeSelect || !state.catalog.doorStyles.some((style) => style.id === activeSelect.value)) {
+    showAppMessage("Door style unavailable", "Choose an available door style before calculating the cutlist.");
+    return;
+  }
   const doorRows = state.ui.doorInputMode === "size" ? readDoorRows() : [];
   const openingRows = state.ui.doorInputMode === "opening" ? readOpeningRows() : [];
   const openingSizes = doorSizesFromOpenings(openingRows);
@@ -2068,6 +2080,17 @@ function reportSaveError(err) {
   }
 }
 
+async function refreshAfterSave() {
+  try {
+    await loadCatalog();
+    await refreshUi();
+    return true;
+  } catch (err) {
+    showAppMessage("Saved, but refresh failed", "The server saved your change, but the updated account data could not be loaded. Reload the page to check it. " + (err.message || ""));
+    return false;
+  }
+}
+
 async function saveProject() {
   const name = byId("projectName").value.trim();
   if (!name) {
@@ -2092,41 +2115,28 @@ async function saveProject() {
 
   const existingId = byId("projectSelect").value;
 
+  let saved;
   try {
-  if (await ensureDataMode() === "api") {
+    await requireApiForSave();
     if (existingId) {
-      await apiJsonWithReauth(`/api/projects/${existingId}`, {
+      saved = await apiJsonWithReauth(`/api/projects/${existingId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, payload })
       });
     } else {
-      await apiJsonWithReauth("/api/projects", {
+      saved = await apiJsonWithReauth("/api/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, payload })
       });
     }
-  } else {
-    const projects = localProjects();
-    if (existingId) {
-      const idx = projects.findIndex((project) => project.id === existingId);
-      if (idx >= 0) {
-        projects[idx] = { ...projects[idx], name, payload, updatedAt: new Date().toISOString() };
-      }
-    } else {
-      projects.push({ id: Math.random().toString(36).slice(2, 10), name, payload, createdAt: new Date().toISOString() });
-    }
-    saveLocalProjects(projects);
-  }
   } catch (err) {
     reportSaveError(err);
     return;
   }
 
-  await loadCatalog();
-  await refreshUi();
-  const saved = state.projects.find((p) => p.name === name);
+  if (!(await refreshAfterSave())) return;
   if (saved) {
     byId("projectSelect").value = saved.id;
   }
@@ -2569,14 +2579,15 @@ function updateDrawerConstructionReference() {
 }
 
 async function saveSettings() {
-  if (await ensureDataMode() === "api") {
-    await apiJson("/api/settings", {
+  try {
+    await requireApiForSave();
+    await apiJsonWithReauth("/api/settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(state.settings)
     });
-  } else {
-    saveLocalSettings(state.settings);
+  } catch (err) {
+    reportSaveError(err);
   }
 }
 
@@ -2617,10 +2628,16 @@ async function loadProject() {
 
   const doorStyleSelect = byId("doorStyleSelect");
   if (doorStyleSelect && project.payload?.doorSizeStyleId) {
+    if (!state.catalog.doorStyles.some((style) => style.id === project.payload.doorSizeStyleId)) {
+      doorStyleSelect.appendChild(createOption(project.payload.doorSizeStyleId, "Unavailable saved style - choose a replacement"));
+    }
     doorStyleSelect.value = project.payload.doorSizeStyleId;
   }
   const doorOpeningStyleSelect = byId("doorOpeningStyleSelect");
   if (doorOpeningStyleSelect && project.payload?.doorOpeningStyleId) {
+    if (!state.catalog.doorStyles.some((style) => style.id === project.payload.doorOpeningStyleId)) {
+      doorOpeningStyleSelect.appendChild(createOption(project.payload.doorOpeningStyleId, "Unavailable saved style - choose a replacement"));
+    }
     doorOpeningStyleSelect.value = project.payload.doorOpeningStyleId;
   }
   const drawerOpeningSlideSelect = byId("drawerOpeningSlideSelect");
@@ -2650,6 +2667,10 @@ async function loadProject() {
   ensureDoorOpeningRows();
   ensureDrawerOpeningRows();
   ensureDrawerBoxRows();
+  const styleId = state.ui.doorInputMode === "opening" ? doorOpeningStyleSelect?.value : doorStyleSelect?.value;
+  if (styleId && !state.catalog.doorStyles.some((style) => style.id === styleId)) {
+    showAppMessage("Door style unavailable", "This project's saved door style is unavailable. Choose a replacement before calculating the cutlist.");
+  }
 }
 
 async function deleteProject() {
@@ -2658,78 +2679,60 @@ async function deleteProject() {
     return;
   }
 
-  if (await ensureDataMode() === "api") {
-    await apiJson(`/api/projects/${projectId}`, { method: "DELETE" });
-  } else {
-    const projects = localProjects().filter((project) => project.id !== projectId);
-    saveLocalProjects(projects);
+  try {
+    await requireApiForSave();
+    await apiJsonWithReauth(`/api/projects/${projectId}`, { method: "DELETE" });
+  } catch (err) {
+    reportSaveError(err);
+    return;
   }
 
   byId("projectName").value = "";
-  await loadCatalog();
-  await refreshUi();
+  await refreshAfterSave();
 }
 
 async function addCatalogItem({ listKey, payload, apiPath }) {
   try {
-  if (await ensureDataMode() === "api") {
-    await apiJson(apiPath, {
+    await requireApiForSave();
+    await apiJsonWithReauth(apiPath, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
-  } else {
-    const catalog = localCatalog();
-    catalog[listKey] = [...catalog[listKey], { id: Math.random().toString(36).slice(2, 10), ...payload }];
-    saveLocalCatalog(catalog);
-  }
   } catch (err) {
     reportSaveError(err);
     return;
   }
 
-  await loadCatalog();
-  await refreshUi();
+  await refreshAfterSave();
 }
 
 async function deleteCatalogItem({ listKey, id, apiPath }) {
   try {
-  if (await ensureDataMode() === "api") {
-    await apiJson(`${apiPath}/${id}`, { method: "DELETE" });
-  } else {
-    const catalog = localCatalog();
-    catalog[listKey] = catalog[listKey].filter((item) => item.id !== id);
-    saveLocalCatalog(catalog);
-  }
+    await requireApiForSave();
+    await apiJsonWithReauth(`${apiPath}/${id}`, { method: "DELETE" });
   } catch (err) {
     reportSaveError(err);
     return;
   }
 
-  await loadCatalog();
-  await refreshUi();
+  await refreshAfterSave();
 }
 
 async function updateCatalogItem({ listKey, id, payload, apiPath }) {
   try {
-  if (await ensureDataMode() === "api") {
-    await apiJson(`${apiPath}/${id}`, {
+    await requireApiForSave();
+    await apiJsonWithReauth(`${apiPath}/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
-  } else {
-    const catalog = localCatalog();
-    catalog[listKey] = catalog[listKey].map((item) => (item.id === id ? { ...item, ...payload } : item));
-    saveLocalCatalog(catalog);
-  }
   } catch (err) {
     reportSaveError(err);
     return;
   }
 
-  await loadCatalog();
-  await refreshUi();
+  await refreshAfterSave();
 }
 
 async function editDoorStyle(id) {
