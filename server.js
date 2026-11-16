@@ -25,6 +25,8 @@ const STATIC_FILES = new Set([
   "config.js",
   "Bottom Groove Location and Depth(Square).png",
   "Bottom Groove Location and Depth.png",
+  "cope-n-stick.png",
+  "mitered.png",
   "ButtJoint Drawer.jpg",
   "ButtJoint Side Long.png",
   "ButtJoint Side Short.png",

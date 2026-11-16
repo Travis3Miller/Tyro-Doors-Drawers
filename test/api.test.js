@@ -165,6 +165,12 @@ test("health/config, auth session, project isolation, and billing entitlement", 
   const assetRes = await jsonRequest(baseUrl, "/api/assets/ButtJoint%20Drawer.jpg");
   assert.equal(assetRes.status, 200);
 
+  for (const name of ["cope-n-stick.png", "mitered.png"]) {
+    const response = await jsonRequest(baseUrl, `/api/assets/${encodeURIComponent(name)}`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("content-type"), /image\/png/);
+  }
+
   const missingAssetRes = await jsonRequest(baseUrl, "/api/assets/not-a-real-file.png");
   assert.equal(missingAssetRes.status, 404);
 

@@ -35,6 +35,31 @@ function frontend() {
   return { context, elements };
 }
 
+test("door setup switches between the correct joint reference diagrams", () => {
+  const { context, elements } = frontend();
+  elements.newDoorJointType = { value: "copeStick" };
+  elements.matchRailsToStiles = { checked: false };
+  elements.railWidthsWrap = { style: {} };
+  elements.doorReferenceImage = {};
+  elements.doorReferenceTitle = {};
+  elements.doorReferenceCaption = {};
+
+  vm.runInContext("updateRailInputsVisibility()", context);
+  assert.equal(elements.doorReferenceImage.src, "cope-n-stick.png");
+  assert.match(elements.doorReferenceCaption.textContent, /clearance per panel edge/);
+
+  elements.newDoorJointType.value = "mitered";
+  vm.runInContext("updateRailInputsVisibility()", context);
+  assert.equal(elements.doorReferenceImage.src, "mitered.png");
+  assert.match(elements.doorReferenceImage.alt, /Mitered door construction/);
+  assert.equal(elements.matchRailsToStiles.checked, true);
+
+  elements.newDoorJointType.value = "copeStick";
+  vm.runInContext("updateRailInputsVisibility()", context);
+  assert.equal(elements.doorReferenceImage.src, "cope-n-stick.png");
+  assert.equal(elements.matchRailsToStiles.disabled, false);
+});
+
 test("refreshing selections keeps the custom door style and its cutlist measurements", () => {
   const { context, elements } = frontend();
   vm.runInContext(`

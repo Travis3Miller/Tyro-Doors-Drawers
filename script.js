@@ -2193,26 +2193,26 @@ function updateRailInputsVisibility() {
     matchRails.checked = true;
     matchRails.disabled = true;
     if (referenceImage) {
-      referenceImage.src = assetUrl("Bottom Groove Location and Depth(Square).png");
-      referenceImage.alt = "Mitered door reference showing mitered rail/stile construction.";
+      referenceImage.src = assetUrl("mitered.png");
+      referenceImage.alt = "Mitered door construction and stile and rail measurements.";
     }
     if (referenceTitle) {
       referenceTitle.textContent = "Mitered Door Reference";
     }
     if (referenceCaption) {
-      referenceCaption.textContent = "Mitered Door Reference (rails and stiles are equal width).";
+      referenceCaption.textContent = "X = matching stile/rail width, Y = groove depth, Z = clearance per panel edge.";
     }
   } else {
     matchRails.disabled = false;
     if (referenceImage) {
-      referenceImage.src = assetUrl("Bottom Groove Location and Depth.png");
-      referenceImage.alt = "Cope N Stick reference showing X for stile/rail width, Y for groove distance, Z for panel clearance.";
+      referenceImage.src = assetUrl("cope-n-stick.png");
+      referenceImage.alt = "Cope N Stick door construction and stile and rail measurements.";
     }
     if (referenceTitle) {
       referenceTitle.textContent = "Cope N Stick Reference";
     }
     if (referenceCaption) {
-      referenceCaption.textContent = "Cope N Stick Reference: X = stile/rail width, Y = groove distance, Z = panel size offset vs rail.";
+      referenceCaption.textContent = "X = stile/rail width, Y = groove depth, Z = clearance per panel edge.";
     }
   }
 
